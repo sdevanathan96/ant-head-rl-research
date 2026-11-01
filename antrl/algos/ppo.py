@@ -73,15 +73,31 @@ class PPOLearner:
         c = self.cfg
         T, E = roll["team"].shape
         values = roll["values"]
-        adv = np.zeros_like(values)
-        gae = np.zeros_like(roll["last_values"])
-        for t in reversed(range(T)):
-            next_v = roll["last_values"] if t == T - 1 else values[t + 1]
-            not_done = (1.0 - roll["done"][t])[:, None]
-            delta = roll["team"][t][:, None] + c.gamma * next_v * not_done - values[t]
-            gae = delta + c.gamma * c.gae_lambda * not_done * gae
-            adv[t] = gae
-        returns = adv + values
+        has_own = "rewards" in roll
+        if has_own:
+            step_r = 0.5 * roll["rewards"] + 0.5 * (roll["team"][:, :, None] / self.n)
+            v_agent = np.repeat(values, self.n, axis=-1) if values.shape[-1] == 1 else values
+            last_v_agent = np.repeat(roll["last_values"], self.n, axis=-1) if roll["last_values"].shape[-1] == 1 else roll["last_values"]
+            adv = np.zeros_like(v_agent)
+            gae = np.zeros_like(last_v_agent)
+            for t in reversed(range(T)):
+                next_v = last_v_agent if t == T - 1 else v_agent[t + 1]
+                not_done = (1.0 - roll["done"][t])[:, None]
+                delta = step_r[t] + c.gamma * next_v * not_done - v_agent[t]
+                gae = delta + c.gamma * c.gae_lambda * not_done * gae
+                adv[t] = gae
+            returns_agent = adv + v_agent
+            returns = returns_agent.mean(axis=-1, keepdims=True) if values.shape[-1] == 1 else returns_agent
+        else:
+            adv = np.zeros_like(values)
+            gae = np.zeros_like(roll["last_values"])
+            for t in reversed(range(T)):
+                next_v = roll["last_values"] if t == T - 1 else values[t + 1]
+                not_done = (1.0 - roll["done"][t])[:, None]
+                delta = roll["team"][t][:, None] + c.gamma * next_v * not_done - values[t]
+                gae = delta + c.gamma * c.gae_lambda * not_done * gae
+                adv[t] = gae
+            returns = adv + values
 
         flat = lambda x: torch.as_tensor(x.reshape(T * E, *x.shape[2:]), device=self.device)
         obs, state, actions, old_logp = flat(roll["obs"]), flat(roll["state"]), flat(roll["actions"]), flat(roll["logp"])

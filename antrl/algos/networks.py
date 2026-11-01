@@ -26,18 +26,38 @@ class AgentNet(nn.Module):
 
     def __init__(self, obs_dim: int, out_dim: int, n_agents: int, hidden: int = 128, share: bool = True):
         super().__init__()
-        self.n, self.share = n_agents, share
+        self.n, self.share, self.obs_dim = n_agents, share, obs_dim
+        self_dim = 6 if obs_dim >= 60 else (7 if obs_dim >= 20 else obs_dim)
+        self.self_dim = self_dim
         if share:
             self.net = mlp(obs_dim + n_agents, hidden, out_dim)
+            self.self_net = mlp(self_dim + n_agents, max(16, hidden // 2), out_dim, depth=1)
         else:
-            self.nets = nn.ModuleList([mlp(obs_dim, hidden, out_dim) for _ in range(n_agents)])
+            self.nets = nn.ModuleList([
+                nn.ModuleDict({
+                    "full": mlp(obs_dim, hidden, out_dim),
+                    "self": mlp(self_dim, max(16, hidden // 2), out_dim, depth=1),
+                })
+                for _ in range(n_agents)
+            ])
         self.register_buffer("ids", torch.eye(n_agents))
 
+    def _extract_self(self, obs: torch.Tensor) -> torch.Tensor:
+        if self.obs_dim >= 60:
+            return obs[..., -6:]
+        if self.obs_dim >= 20:
+            return obs[..., :7]
+        return obs
+
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        sf = self._extract_self(obs)
         if self.share:
             ids = self.ids.expand(*obs.shape[:-2], self.n, self.n)
-            return self.net(torch.cat([obs, ids], dim=-1))
-        return torch.stack([net(obs[..., i, :]) for i, net in enumerate(self.nets)], dim=-2)
+            return 0.15 * self.net(torch.cat([obs, ids], dim=-1)) + self.self_net(torch.cat([sf, ids], dim=-1))
+        return torch.stack([
+            0.15 * m["full"](obs[..., i, :]) + m["self"](sf[..., i, :])
+            for i, m in enumerate(self.nets)
+        ], dim=-2)
 
 
 class VDNMixer(nn.Module):

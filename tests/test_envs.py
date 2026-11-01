@@ -157,3 +157,40 @@ def test_gini():
     assert gini(np.array([1, 1, 1, 1])) == pytest.approx(0.0)
     assert gini(np.array([0, 0, 0, 4])) == pytest.approx(0.75)
     assert gini(np.zeros(4)) == 0.0
+
+
+def test_grab_release_shaping_does_not_farm_reward():
+    """Alternating WORK (grab) and STAY (release) must not accumulate positive shaping reward."""
+    env = grid(shaping=0.1)
+    env.piece_state[0] = 1
+    env.piece_pos[0] = np.array([2.0, 2.0])
+    place(env, 0, [2.0, 2.0])
+    total = 0.0
+    for t in range(10):
+        act = WORK if t % 2 == 0 else STAY
+        _, _, own, _, _, _ = env.step([act, STAY])
+        total += own[0]
+    assert total <= 0.0
+
+
+def test_transport_shaping_rewards_progress_toward_nest():
+    """Pulling a held piece closer to the nest yields positive shaping; pulling away yields negative."""
+    env = grid(shaping=0.1)
+    start = env.nest + [-2, 0]
+    _two_holders_on_a_piece(env, start)
+    _, _, own_toward, team_toward, _, _ = env.step([EAST, EAST])
+    assert (own_toward > 0.0).all() and team_toward > 0.0
+    _, _, own_away, team_away, _, _ = env.step([WEST, WEST])
+    assert (own_away < 0.0).all() and team_away < 0.0
+
+
+def test_overcutting_is_prevented_on_final_piece():
+    """Multiple ants cutting on the last remaining piece cannot exceed total cut_work."""
+    env = grid(cut_work=2)
+    env.big_left[0] = 1
+    env.big_progress[0] = 1
+    place(env, 0, env.big_pos[0])
+    place(env, 1, env.big_pos[0])
+    env.step([WORK, WORK])
+    assert env.stats.cut_work == 1 and env.big_left[0] == 0
+

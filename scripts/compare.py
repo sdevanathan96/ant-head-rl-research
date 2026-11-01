@@ -20,7 +20,7 @@ def main(root="runs"):
         groups[(str(f.parent.parent.relative_to(root)), world, algo)].append(rows[-1])
     if not groups:
         sys.exit(f"no metrics.csv under {root}")
-    cols = ("team_value", "crumbs", "pieces", "cut_work", "stalled_pulls", "gini")
+    cols = ("team_value", "crumbs", "pieces", "cut_work", "moving_pulls", "stalled_pulls", "gini")
     print(f"{'group':<14}{'world':<6}{'algo':<10}{'n':>3}  " + "".join(f"{c:>17}" for c in cols) + "   steps")
     for (group, world, algo), rows in sorted(groups.items()):
         cells = []

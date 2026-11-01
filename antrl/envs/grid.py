@@ -49,6 +49,9 @@ class GridForage(ForageEnv):
     def _near(self, a, b):
         return bool(np.array_equal(a, b))
 
+    def _dist(self, a, b) -> float:
+        return float(np.abs(a - b).sum())
+
     def _at_nest(self, p):
         return bool(np.array_equal(p, self.nest))
 
@@ -108,8 +111,15 @@ class GridForage(ForageEnv):
     def _self_features(self, i):
         holding = self.holding[i] >= 0
         partners = len(self.piece_holders[self.holding[i]]) / self.cfg.piece_weight if holding else 0.0
-        home = (self.nest - self.ant_pos[i]) / self.size
-        return np.array([float(self.carrying[i]), float(holding), partners, home[0], home[1],
+        target = self._target_pos(i)
+        d = target - self.ant_pos[i]
+        if abs(d[0]) >= abs(d[1]) and d[0] != 0:
+            step_dir = np.array([np.sign(d[0]), 0.0], dtype=np.float32)
+        elif d[1] != 0:
+            step_dir = np.array([0.0, np.sign(d[1])], dtype=np.float32)
+        else:
+            step_dir = np.zeros(2, dtype=np.float32)
+        return np.array([float(self.carrying[i]), float(holding), partners, step_dir[0], step_dir[1],
                          self.t / self.cfg.max_steps], dtype=np.float32)
 
     def _state(self):

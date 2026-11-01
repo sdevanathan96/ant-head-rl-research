@@ -31,12 +31,12 @@ from .algos.value_based import ValueConfig, ValueLearner
 from .envs import make_env
 
 PRESETS = {
-    "iql":      ("value", {"mixer": "none", "reward": "own", "share": False}, {"observe_teammates": False}),
-    "iql_team": ("value", {"mixer": "none", "reward": "team", "share": False}, {"observe_teammates": False}),
-    "vdn":      ("value", {"mixer": "vdn", "share": True}, {"observe_teammates": True}),
-    "qmix":     ("value", {"mixer": "qmix", "share": True}, {"observe_teammates": True}),
-    "ippo":     ("ppo", {"centralized_critic": False, "share": True}, {"observe_teammates": True}),
-    "mappo":    ("ppo", {"centralized_critic": True, "share": True}, {"observe_teammates": True}),
+    "iql":      ("value", {"mixer": "none", "reward": "own", "share": False}, {"observe_teammates": False, "shaping": 0.1}),
+    "iql_team": ("value", {"mixer": "none", "reward": "team", "share": False}, {"observe_teammates": False, "shaping": 0.1}),
+    "vdn":      ("value", {"mixer": "vdn", "share": True}, {"observe_teammates": True, "shaping": 0.1}),
+    "qmix":     ("value", {"mixer": "qmix", "share": True}, {"observe_teammates": True, "shaping": 0.1}),
+    "ippo":     ("ppo", {"centralized_critic": False, "share": True}, {"observe_teammates": True, "shaping": 0.1}),
+    "mappo":    ("ppo", {"centralized_critic": True, "share": True}, {"observe_teammates": True, "shaping": 0.1}),
 }
 
 
@@ -92,6 +92,7 @@ def evaluate(world: str, env_kw: dict, learner, episodes: int = 20, seed: int = 
            for key in ("team_value", "crumbs", "pieces", "cut_work", "grabs", "stalled_pulls", "moving_pulls", "gini")}
     out["team_value_std"] = float(np.std([s["team_value"] for s in summaries]))
     out["per_ant_share"] = np.mean([s["per_ant_share"] for s in summaries], axis=0).round(3).tolist()
+    out["per_ant_cut"] = np.mean([s["per_ant_cut"] for s in summaries], axis=0).round(3).tolist()
     out["max_team_value"] = env.max_team_value()
     return out
 
@@ -120,17 +121,19 @@ def train_ppo(world, env_kw, learner: PPOLearner, steps: int, seed: int, on_eval
     state = np.stack([e._state() for e in envs])
     step, next_eval, last = 0, eval_every, {}
     while step < steps:
-        buf = {k: [] for k in ("obs", "state", "actions", "logp", "values", "team", "done")}
+        buf = {k: [] for k in ("obs", "state", "actions", "logp", "values", "rewards", "team", "done")}
         for _ in range(c.rollout_steps):
             a, logp, v = learner.act(obs, state)
             buf["obs"].append(obs); buf["state"].append(state)
             buf["actions"].append(a); buf["logp"].append(logp); buf["values"].append(v)
-            team_r, dones, new_obs, new_state = [], [], [], []
+            own_r, team_r, dones, new_obs, new_state = [], [], [], [], []
             for e, env in enumerate(envs):
-                o, s, _, r, d, _ = env.step(a[e])
+                o, s, own, r, d, info = env.step(a[e])
                 if d:
                     o, s, _ = env.reset()
-                team_r.append(r); dones.append(float(d)); new_obs.append(o); new_state.append(s)
+                own_r.append(own); team_r.append(r); dones.append(float(info["terminated"]))
+                new_obs.append(o); new_state.append(s)
+            buf["rewards"].append(np.array(own_r, np.float32))
             buf["team"].append(np.array(team_r, np.float32)); buf["done"].append(np.array(dones, np.float32))
             obs, state = np.stack(new_obs), np.stack(new_state)
             step += c.num_envs
@@ -176,8 +179,10 @@ def main(argv=None):
     def on_eval(step, train_stats):
         nonlocal header_written
         ev = evaluate(args.world, env_kw, learner, args.eval_episodes)
-        row = {"step": step, "minutes": round((time.time() - t0) / 60, 2), **{k: v for k, v in ev.items() if k != "per_ant_share"},
-               "per_ant_share": " ".join(map(str, ev["per_ant_share"])), **train_stats}
+        row = {"step": step, "minutes": round((time.time() - t0) / 60, 2),
+               **{k: v for k, v in ev.items() if k not in ("per_ant_share", "per_ant_cut")},
+               "per_ant_share": " ".join(map(str, ev["per_ant_share"])),
+               "per_ant_cut": " ".join(map(str, ev["per_ant_cut"])), **train_stats}
         with csv_path.open("a", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(row))
             if not header_written:

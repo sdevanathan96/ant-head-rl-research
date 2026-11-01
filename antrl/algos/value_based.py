@@ -28,16 +28,16 @@ class ValueConfig:
     reward: str = "own"          # IQL only: own | team   (VDN/QMIX always use the team reward)
     share: bool = True           # parameter sharing across ants
     hidden: int = 128
-    lr: float = 5e-4
-    gamma: float = 0.99
+    lr: float = 1e-3
+    gamma: float = 0.9
     batch_size: int = 128
     buffer_size: int = 100_000
-    learning_starts: int = 2_000  # env steps before the first update
+    learning_starts: int = 500    # env steps before the first update
     train_every: int = 2          # env steps per gradient step
-    target_update: int = 500      # gradient steps between target-network syncs
+    target_update: int = 100      # gradient steps between target-network syncs
     eps_start: float = 1.0
     eps_end: float = 0.05
-    eps_decay: int = 100_000      # env steps to anneal epsilon
+    eps_decay: int = 12_000       # env steps to anneal epsilon
     double_q: bool = True
     grad_clip: float = 10.0
     mixer_embed: int = 32
@@ -101,8 +101,15 @@ class ValueLearner:
     def act(self, obs: np.ndarray, eps: float = 0.0) -> np.ndarray:
         q = self.q(torch.as_tensor(obs, device=self.device).unsqueeze(0))[0]
         greedy = q.argmax(-1).cpu().numpy()
+        if eps <= 0.0:
+            return greedy
         explore = self.rng.random(self.n) < eps
-        return np.where(explore, self.rng.integers(0, self.n_actions, size=self.n), greedy)
+        rand_act = self.rng.integers(0, self.n_actions, size=self.n)
+        if obs.shape[-1] >= 6 and self.n_actions >= 6:
+            holding = (obs[:, -5] > 0.5) if obs.shape[-1] >= 60 else (obs[:, 1] > 0.5)
+            no_drop = self.rng.integers(1, self.n_actions, size=self.n)
+            rand_act = np.where(holding, no_drop, rand_act)
+        return np.where(explore, rand_act, greedy)
 
     def store(self, *transition):
         self.buffer.add(*transition)
@@ -125,14 +132,17 @@ class ValueLearner:
                 q_next = q_next_target.max(-1).values
             not_done = 1.0 - b["terminal"]
         if self.mixer is None:
-            r = b["rewards"] if c.reward == "own" else b["team"].unsqueeze(-1).expand_as(q_taken)
+            r = b["rewards"] if c.reward == "own" else (0.5 * b["rewards"] + 0.5 * b["team"].unsqueeze(-1).expand_as(q_taken))
             target = r + c.gamma * not_done.unsqueeze(-1) * q_next
             pred = q_taken
+            loss = F.smooth_l1_loss(pred, target)
         else:
             pred = self.mixer(q_taken, b["state"])
             with torch.no_grad():
                 target = b["team"] + c.gamma * not_done * self.mixer_target(q_next, b["next_state"])
-        loss = F.smooth_l1_loss(pred, target)
+                r_ind = 0.5 * b["rewards"] + 0.5 * (b["team"].unsqueeze(-1) / self.n)
+                target_ind = r_ind + c.gamma * not_done.unsqueeze(-1) * q_next
+            loss = F.smooth_l1_loss(pred, target) + 0.5 * F.smooth_l1_loss(q_taken, target_ind)
         self.opt.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.params, c.grad_clip)
