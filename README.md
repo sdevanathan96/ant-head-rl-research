@@ -101,7 +101,8 @@ Implementation stage. The environments and all six learners run end to end,
 and the test suite checks the mechanics (cutting, same-direction and
 force-summed transport, delivery credit, partial views) and the algorithms
 (QMIX monotonicity, VDN sum, per-ant IQL targets, PPO updates for both
-critics). First training comparisons are in progress.
+critics). First results are in [RESULTS.md](RESULTS.md): every learner learns
+to forage crumbs, and none yet learns to carry a piece together.
 
 Next steps from the research plan: longer multi-seed comparisons, recurrent
 agents for the partial views, and a curriculum (or shaping schedule) for the
