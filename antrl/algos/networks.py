@@ -18,47 +18,31 @@ def mlp(in_dim: int, hidden: int, out_dim: int, depth: int = 2) -> nn.Sequential
 class AgentNet(nn.Module):
     """Maps each ant's observation to an output (Q-values, logits or a value).
 
-    ``share=True``  one network for every ant (parameter sharing); a one-hot ant id
-                    is appended so ants can still specialise.
+    ``share=True``  one network for every ant (parameter sharing); with ``agent_id``
+                    a one-hot ant id is appended so ants can still specialise.
+                    Without it, ants with identical observations act identically.
     ``share=False`` a separate network per ant (fully independent learners).
     Input ``[..., n_agents, obs_dim]`` → output ``[..., n_agents, out_dim]``.
+    The observation is used as given: no task-specific rewriting.
     """
 
-    def __init__(self, obs_dim: int, out_dim: int, n_agents: int, hidden: int = 128, share: bool = True):
+    def __init__(self, obs_dim: int, out_dim: int, n_agents: int, hidden: int = 128, share: bool = True,
+                 agent_id: bool = True):
         super().__init__()
-        self.n, self.share, self.obs_dim = n_agents, share, obs_dim
+        self.n, self.share, self.agent_id = n_agents, share, agent_id
         if share:
-            self.net = mlp(obs_dim + n_agents, hidden, out_dim)
+            self.net = mlp(obs_dim + (n_agents if agent_id else 0), hidden, out_dim)
         else:
             self.nets = nn.ModuleList([mlp(obs_dim, hidden, out_dim) for _ in range(n_agents)])
         self.register_buffer("ids", torch.eye(n_agents))
 
-    def _prepare_obs(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        x = obs.clone()
-        if self.obs_dim >= 60:
-            holding = (x[..., -5] > 0.5)
-            partners = x[..., -4]
-            ready = holding & (partners >= 0.99)
-            x[..., -6] = torch.where(ready, torch.ones_like(x[..., -6]), x[..., -6])
-            x[..., -5] = torch.where(ready, torch.zeros_like(x[..., -5]), x[..., -5])
-            x[..., -4] = torch.where(ready, torch.zeros_like(x[..., -4]), x[..., -4])
-            return x, holding.float().unsqueeze(-1)
-        if self.obs_dim >= 20:
-            holding = (x[..., 1] > 0.5)
-            partners = x[..., 2]
-            ready = holding & (partners >= 0.99)
-            x[..., 0] = torch.where(ready, torch.ones_like(x[..., 0]), x[..., 0])
-            x[..., 1] = torch.where(ready, torch.zeros_like(x[..., 1]), x[..., 1])
-            x[..., 2] = torch.where(ready, torch.zeros_like(x[..., 2]), x[..., 2])
-            return x, holding.float().unsqueeze(-1)
-        return x, torch.zeros((*obs.shape[:-1], 1), device=obs.device, dtype=obs.dtype)
-
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        x, holding = self._prepare_obs(obs)
         if self.share:
-            ids = self.ids.expand(*obs.shape[:-2], self.n, self.n) * (1.0 - holding)
-            return self.net(torch.cat([x, ids], dim=-1))
-        return torch.stack([net(x[..., i, :]) for i, net in enumerate(self.nets)], dim=-2)
+            if not self.agent_id:
+                return self.net(obs)
+            ids = self.ids.expand(*obs.shape[:-2], self.n, self.n)
+            return self.net(torch.cat([obs, ids], dim=-1))
+        return torch.stack([net(obs[..., i, :]) for i, net in enumerate(self.nets)], dim=-2)
 
 
 class VDNMixer(nn.Module):

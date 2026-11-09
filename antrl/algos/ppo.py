@@ -36,6 +36,7 @@ class PPOConfig:
     grad_clip: float = 0.5
     rollout_steps: int = 128          # steps per env per update
     num_envs: int = 8
+    agent_id: bool = True             # append a one-hot ant id to shared networks
 
 
 class PPOLearner:
@@ -44,11 +45,11 @@ class PPOLearner:
         self.cfg = cfg = cfg or PPOConfig()
         self.n, self.device = n_agents, torch.device(device)
         torch.manual_seed(seed)
-        self.actor = AgentNet(obs_dim, n_actions, n_agents, cfg.hidden, cfg.share).to(self.device)
+        self.actor = AgentNet(obs_dim, n_actions, n_agents, cfg.hidden, cfg.share, cfg.agent_id).to(self.device)
         if cfg.centralized_critic:
             self.critic: nn.Module = mlp(state_dim, cfg.hidden, 1).to(self.device)
         else:
-            self.critic = AgentNet(obs_dim, 1, n_agents, cfg.hidden, cfg.share).to(self.device)
+            self.critic = AgentNet(obs_dim, 1, n_agents, cfg.hidden, cfg.share, cfg.agent_id).to(self.device)
         self.params = list(self.actor.parameters()) + list(self.critic.parameters())
         self.opt = torch.optim.Adam(self.params, lr=cfg.lr, eps=1e-5)
 
@@ -63,24 +64,8 @@ class PPOLearner:
         """obs [E, n, d], state [E, S] → actions [E, n], logp [E, n], values [E, 1|n]."""
         o = torch.as_tensor(obs, device=self.device)
         s = torch.as_tensor(state, device=self.device)
-        logits = self.actor(o)
-        dist = Categorical(logits=logits)
-        if greedy:
-            a = dist.probs.argmax(-1)
-        else:
-            u = torch.rand_like(logits).clamp(1e-6, 1.0 - 1e-6)
-            gumbel = -torch.log(-torch.log(u))
-            if o.shape[-1] >= 20:
-                holding = (o[..., -5] > 0.5) if o.shape[-1] >= 60 else (o[..., 1] > 0.5)
-                partners = o[..., -4] if o.shape[-1] >= 60 else o[..., 2]
-                shared_g = gumbel[..., :1, :].expand_as(gumbel)
-                g = torch.where(holding.unsqueeze(-1), shared_g, gumbel)
-                waiting = holding & (partners < 0.99)
-                m_logits = logits.clone()
-                m_logits[..., 0] = torch.where(waiting, torch.tensor(-1e8, device=self.device), m_logits[..., 0])
-                a = (m_logits + g).argmax(-1)
-            else:
-                a = dist.sample()
+        dist = Categorical(logits=self.actor(o))
+        a = dist.probs.argmax(-1) if greedy else dist.sample()   # each ant samples independently
         return a.cpu().numpy(), dist.log_prob(a).cpu().numpy(), self._values(o, s).cpu().numpy()
 
     def update(self, roll: dict) -> dict:

@@ -89,3 +89,41 @@ def test_evaluate_reports_shares():
     learner = ValueLearner(env.n_agents, env.obs_dim, env.state_dim, env.n_actions, ValueConfig(hidden=16))
     out = evaluate("grid", {"n_ants": 3, "size": 7}, learner, episodes=2)
     assert len(out["per_ant_share"]) == 3 and 0.0 <= out["gini"] <= 1.0
+
+
+def test_ppo_samples_each_ant_independently_even_while_holding():
+    """No hand-coded holder logic: a lone holder can still sample STAY (which lets go)."""
+    env = make_env("grid", seed=0, n_ants=2, size=7)
+    env.piece_state[0] = 1
+    env.piece_pos[0] = np.array([2.0, 2.0])
+    env.ant_pos[:] = np.array([2.0, 2.0])
+    obs, state, *_ = env.step([5, 0])                # ant 0 grabs, ant 1 stays off the piece
+    assert env.holding[0] == 0 and env.holding[1] == -1
+    learner = PPOLearner(env.n_agents, env.obs_dim, env.state_dim, env.n_actions, PPOConfig(hidden=16))
+    a, _, _ = learner.act(np.repeat(obs[None], 512, 0), np.repeat(state[None], 512, 0))
+    assert (a[:, 0] == 0).any()                      # STAY is never masked out
+
+
+def test_agent_id_switch():
+    obs = torch.zeros(5, 3, 8)
+    with_id, without = AgentNet(8, 4, 3, hidden=16), AgentNet(8, 4, 3, hidden=16, agent_id=False)
+    assert not torch.allclose(with_id(obs)[:, 0], with_id(obs)[:, 1])   # ids break symmetry
+    assert torch.allclose(without(obs)[:, 0], without(obs)[:, 1])       # identical obs -> identical output
+
+
+def test_ppo_rollout_treats_timeouts_as_terminal():
+    """t / max_steps is observed, so a timeout must end the GAE trace (done = 1)."""
+    from antrl.train import train_ppo
+    env_kw = {"max_steps": 5, "n_ants": 2, "size": 7}
+    env = make_env("grid", seed=0, **env_kw)
+    learner = PPOLearner(env.n_agents, env.obs_dim, env.state_dim, env.n_actions,
+                         PPOConfig(hidden=16, rollout_steps=10, num_envs=1))
+    seen = {}
+
+    def capture(roll):
+        seen["done"] = roll["done"][:, 0].tolist()
+        return {}
+
+    learner.update = capture
+    train_ppo("grid", env_kw, learner, steps=10, seed=0, on_eval=lambda *a: None, eval_every=10**9)
+    assert seen["done"] == [0, 0, 0, 0, 1] * 2

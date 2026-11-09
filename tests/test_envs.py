@@ -196,3 +196,27 @@ def test_monotone_transport_shaping_rewards_only_new_nest_progress():
     assert np.allclose(own_away, 0.0)
     _, _, own_repeat, _, _, _ = env.step([EAST, EAST])
     assert np.allclose(own_repeat, 0.0)
+
+
+def test_hold_on_stay_keeps_the_piece_and_drop_lets_go():
+    """With hold_on_stay, STAY no longer drops a held piece; the extra DROP action does."""
+    from antrl.envs.core import DROP
+    env = grid(hold_on_stay=True)
+    assert env.n_actions == 7 and grid().n_actions == 6
+    _two_holders_on_a_piece(env, [2, 2])
+    env.step([STAY, STAY])
+    assert (env.holding[:2] == 0).all()
+    env.step([DROP, STAY])
+    assert env.holding[0] == -1 and env.holding[1] == 0
+
+
+def test_feel_tug_senses_only_partner_pulls_through_the_load():
+    """feel_tug adds 2 features: the summed pull directions of the *other* holders last step."""
+    env = grid(feel_tug=True)
+    assert env.obs_dim == grid().obs_dim + 2
+    _two_holders_on_a_piece(env, [2, 2])
+    obs, *_ = env.step([EAST, WORK])                 # ant 0 pulls east alone; ant 1 keeps holding
+    assert np.allclose(obs[1][-2:], [1.0, 0.0])      # ant 1 feels its partner's pull
+    assert np.allclose(obs[0][-2:], [0.0, 0.0])      # ant 0 does not feel its own pull
+    env.step([STAY, STAY])                           # ant 0 lets go
+    assert np.allclose(env._tug_features(1), [0.0, 0.0])

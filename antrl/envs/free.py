@@ -122,8 +122,9 @@ class FreeForage(ForageEnv):
         holding = self.holding[i] >= 0
         partners = len(self.piece_holders[self.holding[i]]) / self.cfg.piece_weight if holding else 0.0
         home = self.nest - self.ant_pos[i]
-        return np.array([float(self.carrying[i]), float(holding), partners, home[0] / self.L, home[1] / self.L,
-                         np.linalg.norm(home) / self.L, self.t / self.cfg.max_steps], dtype=np.float32)
+        own = np.array([float(self.carrying[i]), float(holding), partners, home[0] / self.L, home[1] / self.L,
+                        np.linalg.norm(home) / self.L, self.t / self.cfg.max_steps], dtype=np.float32)
+        return np.concatenate([own, self._tug_features(i)])
 
     def _state(self):
         c, L = self.cfg, self.L

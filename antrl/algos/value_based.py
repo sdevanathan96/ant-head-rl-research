@@ -41,6 +41,7 @@ class ValueConfig:
     double_q: bool = True
     grad_clip: float = 10.0
     mixer_embed: int = 32
+    agent_id: bool = True        # append a one-hot ant id to the shared Q-network
 
 
 class ReplayBuffer:
@@ -79,7 +80,7 @@ class ValueLearner:
         self.n, self.n_actions, self.device = n_agents, n_actions, torch.device(device)
         self.rng = np.random.default_rng(seed)
         torch.manual_seed(seed)
-        self.q = AgentNet(obs_dim, n_actions, n_agents, cfg.hidden, cfg.share).to(self.device)
+        self.q = AgentNet(obs_dim, n_actions, n_agents, cfg.hidden, cfg.share, cfg.agent_id).to(self.device)
         self.mixer = {"none": None, "vdn": VDNMixer(),
                       "qmix": QMixer(n_agents, state_dim, cfg.mixer_embed)}[cfg.mixer]
         if self.mixer is not None:
@@ -103,13 +104,8 @@ class ValueLearner:
         greedy = q.argmax(-1).cpu().numpy()
         if eps <= 0.0:
             return greedy
-        explore = self.rng.random(self.n) < eps
-        rand_act = self.rng.integers(0, self.n_actions, size=self.n)
-        if obs.shape[-1] >= 20 and self.n_actions >= 6:
-            holding = (obs[:, -5] > 0.5) if obs.shape[-1] >= 60 else (obs[:, 1] > 0.5)
-            shared_pull = int(self.rng.integers(1, self.n_actions))
-            rand_act = np.where(holding, shared_pull, rand_act)
-        return np.where(explore, rand_act, greedy)
+        explore = self.rng.random(self.n) < eps                  # each ant explores independently
+        return np.where(explore, self.rng.integers(0, self.n_actions, size=self.n), greedy)
 
     def store(self, *transition):
         self.buffer.add(*transition)

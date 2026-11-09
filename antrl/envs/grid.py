@@ -112,8 +112,9 @@ class GridForage(ForageEnv):
         holding = self.holding[i] >= 0
         partners = len(self.piece_holders[self.holding[i]]) / self.cfg.piece_weight if holding else 0.0
         home = (self.nest - self.ant_pos[i]) / self.size
-        return np.array([float(self.carrying[i]), float(holding), partners, home[0], home[1],
-                         self.t / self.cfg.max_steps], dtype=np.float32)
+        own = np.array([float(self.carrying[i]), float(holding), partners, home[0], home[1],
+                        self.t / self.cfg.max_steps], dtype=np.float32)
+        return np.concatenate([own, self._tug_features(i)])
 
     def _state(self):
         g = self._layers()[:CH_WALL].ravel()

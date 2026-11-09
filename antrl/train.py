@@ -128,10 +128,13 @@ def train_ppo(world, env_kw, learner: PPOLearner, steps: int, seed: int, on_eval
             buf["actions"].append(a); buf["logp"].append(logp); buf["values"].append(v)
             own_r, team_r, dones, new_obs, new_state = [], [], [], [], []
             for e, env in enumerate(envs):
-                o, s, own, r, d, info = env.step(a[e])
+                o, s, own, r, d, _ = env.step(a[e])
                 if d:
                     o, s, _ = env.reset()
-                own_r.append(own); team_r.append(r); dones.append(float(info["terminated"]))
+                # A timeout is a true terminal state: t / max_steps is in every observation and
+                # in the global state. Bootstrapping past it would read V of the *next* episode's
+                # reset state, because `o` has already been replaced above.
+                own_r.append(own); team_r.append(r); dones.append(float(d))
                 new_obs.append(o); new_state.append(s)
             buf["rewards"].append(np.array(own_r, np.float32))
             buf["team"].append(np.array(team_r, np.float32)); buf["done"].append(np.array(dones, np.float32))

@@ -14,8 +14,10 @@ Subclasses supply the geometry (positions, movement, proximity, observations).
 Actions (same in both worlds)::
 
     0 STAY   stand still; a holder that stays lets go of its piece
+             (with ``hold_on_stay`` a holder that stays keeps holding)
     1 NORTH  2 SOUTH  3 EAST  4 WEST   move (or, when holding a piece, pull it)
     5 WORK   pick up a crumb / cut big food / grab a piece / keep holding
+    6 DROP   only with ``hold_on_stay``: let go of a held piece
 
 Rewards: every step returns one reward per ant (credited to the ant that earned
 it) and a team reward equal to their sum, so independent learners can train on
@@ -28,6 +30,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 STAY, NORTH, SOUTH, EAST, WEST, WORK = range(6)
+DROP = 6                                   # extra action, only when ``hold_on_stay`` is on
 N_ACTIONS = 6
 ACTION_NAMES = ("stay", "north", "south", "east", "west", "work")
 MOVES = {NORTH: (0.0, 1.0), SOUTH: (0.0, -1.0), EAST: (1.0, 0.0), WEST: (-1.0, 0.0)}
@@ -47,6 +50,8 @@ class ForageConfig:
     observe_teammates: bool = True  # False = "blind to teammates" (stage-1 baseline)
     shaping: float = 0.0           # bonus for pickups, cuts and grabs (0 = delivery reward only)
     step_cost: float = 0.0         # per-ant cost per step
+    hold_on_stay: bool = False     # STAY keeps hold of a piece; a 7th action, DROP, lets go
+    feel_tug: bool = False         # holders sense their partners' last pulls through the load (+2 obs)
 
 
 @dataclass
@@ -103,6 +108,7 @@ class ForageEnv:
     def __init__(self, config: ForageConfig | None = None, seed: int | None = None):
         self.cfg = config or ForageConfig()
         self.n_agents = self.cfg.n_ants
+        self.n_actions = N_ACTIONS + (1 if self.cfg.hold_on_stay else 0)
         self.rng = np.random.default_rng(seed)
         self.reset(seed)
         self.obs_dim = self._observe_all().shape[1]
@@ -122,6 +128,10 @@ class ForageEnv:
 
     def _dist_to_nest(self, p: np.ndarray) -> float:
         return float(np.linalg.norm(p - self.nest))
+
+    def _tug_features(self, i: int) -> np.ndarray:
+        """Sum of the other holders' pull directions on ant i's piece last step (local load sensing)."""
+        return self.tug[i].astype(np.float32) if self.cfg.feel_tug else np.zeros(0, dtype=np.float32)
 
     # ── episode ──────────────────────────────────────────────────────────────
     def reset(self, seed: int | None = None):
@@ -150,6 +160,7 @@ class ForageEnv:
         self.crumb_best_dist = np.full(c.n_ants, np.inf)
         self.piece_best_dist = np.full(n_pieces, np.inf)
         self.piece_grabbed = np.zeros((n_pieces, c.n_ants), dtype=bool)
+        self.tug = np.zeros((c.n_ants, 2))
         self.stats = EpisodeStats(c.n_ants)
         return self._observe_all(), self._state(), {}
 
@@ -189,9 +200,10 @@ class ForageEnv:
                     self.piece_grabbed[p, i] = True
                     own[i] += (2.0 * c.shaping) if had_holder else c.shaping
 
-        # 2. STAY releases a held piece
+        # 2. STAY (or DROP, with hold_on_stay) releases a held piece
+        release = DROP if c.hold_on_stay else STAY
         for i in range(self.n_agents):
-            if actions[i] == STAY and self.holding[i] >= 0:
+            if actions[i] == release and self.holding[i] >= 0:
                 self.piece_holders[self.holding[i]].remove(i)
                 self.holding[i] = -1
 
@@ -206,8 +218,12 @@ class ForageEnv:
                         self.crumb_best_dist[i] = d_now
 
         # 4. pieces move by their holders' pulls
+        self.tug = np.zeros((self.n_agents, 2))
         for p in np.flatnonzero(self.piece_state == 1):
             holders = self.piece_holders[p]
+            for h in holders:
+                self.tug[h] = sum((np.array(MOVES[int(actions[j])]) for j in holders
+                                   if j != h and actions[j] in MOVES), np.zeros(2))
             pulls = [int(actions[h]) for h in holders if actions[h] in MOVES]
             if not pulls:
                 continue
