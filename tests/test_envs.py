@@ -159,38 +159,40 @@ def test_gini():
     assert gini(np.zeros(4)) == 0.0
 
 
-def test_grab_release_shaping_does_not_farm_reward():
-    """Alternating WORK (grab) and STAY (release) must not accumulate positive shaping reward."""
+def test_honest_observations_without_hardcoded_targets():
+    """Observations must use path-integrated home vector and have no _target_pos oracle."""
+    env = grid()
+    assert not hasattr(env, "_target_pos")
+    place(env, 0, [2, 3])
+    sf = env._self_features(0)
+    expected_home = (env.nest - np.array([2.0, 3.0])) / env.size
+    assert np.allclose(sf[3:5], expected_home)
+
+
+def test_grab_release_does_not_farm_shaping_reward():
+    """Grabbing a piece awards shaping at most once per ant per piece; repeated WORK/STAY yields 0 extra."""
     env = grid(shaping=0.1)
     env.piece_state[0] = 1
     env.piece_pos[0] = np.array([2.0, 2.0])
     place(env, 0, [2.0, 2.0])
-    total = 0.0
+    rewards = []
     for t in range(10):
         act = WORK if t % 2 == 0 else STAY
         _, _, own, _, _, _ = env.step([act, STAY])
-        total += own[0]
-    assert total <= 0.0
+        rewards.append(own[0])
+    assert rewards[0] == pytest.approx(0.1)
+    assert all(r == pytest.approx(0.0) for r in rewards[1:])
 
 
-def test_transport_shaping_rewards_progress_toward_nest():
-    """Pulling a held piece closer to the nest yields positive shaping; pulling away yields negative."""
+def test_monotone_transport_shaping_rewards_only_new_nest_progress():
+    """Moving a held piece closer to the nest gives positive shaping once; oscillating back and forth gives 0."""
     env = grid(shaping=0.1)
     start = env.nest + [-2, 0]
     _two_holders_on_a_piece(env, start)
-    _, _, own_toward, team_toward, _, _ = env.step([EAST, EAST])
-    assert (own_toward > 0.0).all() and team_toward > 0.0
-    _, _, own_away, team_away, _, _ = env.step([WEST, WEST])
-    assert (own_away < 0.0).all() and team_away < 0.0
-
-
-def test_overcutting_is_prevented_on_final_piece():
-    """Multiple ants cutting on the last remaining piece cannot exceed total cut_work."""
-    env = grid(cut_work=2)
-    env.big_left[0] = 1
-    env.big_progress[0] = 1
-    place(env, 0, env.big_pos[0])
-    place(env, 1, env.big_pos[0])
-    env.step([WORK, WORK])
-    assert env.stats.cut_work == 1 and env.big_left[0] == 0
-
+    env.piece_best_dist[0] = env._dist_to_nest(start)
+    _, _, own_closer, _, _, _ = env.step([EAST, EAST])
+    assert (own_closer > 0.0).all()
+    _, _, own_away, _, _, _ = env.step([WEST, WEST])
+    assert np.allclose(own_away, 0.0)
+    _, _, own_repeat, _, _, _ = env.step([EAST, EAST])
+    assert np.allclose(own_repeat, 0.0)

@@ -54,9 +54,6 @@ class FreeForage(ForageEnv):
     def _near(self, a, b):
         return bool(np.linalg.norm(a - b) < self.fcfg.reach)
 
-    def _dist(self, a, b) -> float:
-        return float(np.linalg.norm(a - b) / self.fcfg.speed)
-
     def _at_nest(self, p):
         return bool(np.linalg.norm(p - self.nest) < self.fcfg.nest_radius)
 
@@ -76,6 +73,9 @@ class FreeForage(ForageEnv):
         if norm < 0.1:                       # (near-)cancelling pulls: the load does not budge
             return p.copy()
         return np.clip(p + self.fcfg.speed * force, 0.0, self.L)
+
+    def _dist_to_nest(self, p):
+        return float(np.linalg.norm(p - self.nest) / self.fcfg.speed)
 
     def _spawn_piece_at(self, big_pos):
         """Cut pieces drop just outside cutting reach, on the nest side of the big item."""
@@ -121,17 +121,9 @@ class FreeForage(ForageEnv):
     def _self_features(self, i):
         holding = self.holding[i] >= 0
         partners = len(self.piece_holders[self.holding[i]]) / self.cfg.piece_weight if holding else 0.0
-        target = self._target_pos(i)
-        d = target - self.ant_pos[i]
-        dist = float(np.linalg.norm(d))
-        if (not self.carrying[i] and not holding and self._near(self.ant_pos[i], target)) or (holding and partners < 1.0):
-            step_dir = np.zeros(2, dtype=np.float32)
-        elif abs(d[0]) >= abs(d[1]):
-            step_dir = np.array([np.sign(d[0]), 0.0], dtype=np.float32)
-        else:
-            step_dir = np.array([0.0, np.sign(d[1])], dtype=np.float32)
-        return np.array([float(self.carrying[i]), float(holding), partners, step_dir[0], step_dir[1],
-                         dist / self.L, self.t / self.cfg.max_steps], dtype=np.float32)
+        home = self.nest - self.ant_pos[i]
+        return np.array([float(self.carrying[i]), float(holding), partners, home[0] / self.L, home[1] / self.L,
+                         np.linalg.norm(home) / self.L, self.t / self.cfg.max_steps], dtype=np.float32)
 
     def _state(self):
         c, L = self.cfg, self.L

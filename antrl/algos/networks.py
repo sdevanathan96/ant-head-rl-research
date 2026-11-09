@@ -27,37 +27,38 @@ class AgentNet(nn.Module):
     def __init__(self, obs_dim: int, out_dim: int, n_agents: int, hidden: int = 128, share: bool = True):
         super().__init__()
         self.n, self.share, self.obs_dim = n_agents, share, obs_dim
-        self_dim = 6 if obs_dim >= 60 else (7 if obs_dim >= 20 else obs_dim)
-        self.self_dim = self_dim
         if share:
             self.net = mlp(obs_dim + n_agents, hidden, out_dim)
-            self.self_net = mlp(self_dim + n_agents, max(16, hidden // 2), out_dim, depth=1)
         else:
-            self.nets = nn.ModuleList([
-                nn.ModuleDict({
-                    "full": mlp(obs_dim, hidden, out_dim),
-                    "self": mlp(self_dim, max(16, hidden // 2), out_dim, depth=1),
-                })
-                for _ in range(n_agents)
-            ])
+            self.nets = nn.ModuleList([mlp(obs_dim, hidden, out_dim) for _ in range(n_agents)])
         self.register_buffer("ids", torch.eye(n_agents))
 
-    def _extract_self(self, obs: torch.Tensor) -> torch.Tensor:
+    def _prepare_obs(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        x = obs.clone()
         if self.obs_dim >= 60:
-            return obs[..., -6:]
+            holding = (x[..., -5] > 0.5)
+            partners = x[..., -4]
+            ready = holding & (partners >= 0.99)
+            x[..., -6] = torch.where(ready, torch.ones_like(x[..., -6]), x[..., -6])
+            x[..., -5] = torch.where(ready, torch.zeros_like(x[..., -5]), x[..., -5])
+            x[..., -4] = torch.where(ready, torch.zeros_like(x[..., -4]), x[..., -4])
+            return x, holding.float().unsqueeze(-1)
         if self.obs_dim >= 20:
-            return obs[..., :7]
-        return obs
+            holding = (x[..., 1] > 0.5)
+            partners = x[..., 2]
+            ready = holding & (partners >= 0.99)
+            x[..., 0] = torch.where(ready, torch.ones_like(x[..., 0]), x[..., 0])
+            x[..., 1] = torch.where(ready, torch.zeros_like(x[..., 1]), x[..., 1])
+            x[..., 2] = torch.where(ready, torch.zeros_like(x[..., 2]), x[..., 2])
+            return x, holding.float().unsqueeze(-1)
+        return x, torch.zeros((*obs.shape[:-1], 1), device=obs.device, dtype=obs.dtype)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        sf = self._extract_self(obs)
+        x, holding = self._prepare_obs(obs)
         if self.share:
-            ids = self.ids.expand(*obs.shape[:-2], self.n, self.n)
-            return 0.15 * self.net(torch.cat([obs, ids], dim=-1)) + self.self_net(torch.cat([sf, ids], dim=-1))
-        return torch.stack([
-            0.15 * m["full"](obs[..., i, :]) + m["self"](sf[..., i, :])
-            for i, m in enumerate(self.nets)
-        ], dim=-2)
+            ids = self.ids.expand(*obs.shape[:-2], self.n, self.n) * (1.0 - holding)
+            return self.net(torch.cat([x, ids], dim=-1))
+        return torch.stack([net(x[..., i, :]) for i, net in enumerate(self.nets)], dim=-2)
 
 
 class VDNMixer(nn.Module):

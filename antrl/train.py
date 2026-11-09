@@ -31,12 +31,12 @@ from .algos.value_based import ValueConfig, ValueLearner
 from .envs import make_env
 
 PRESETS = {
-    "iql":      ("value", {"mixer": "none", "reward": "own", "share": False}, {"observe_teammates": False, "shaping": 0.1}),
-    "iql_team": ("value", {"mixer": "none", "reward": "team", "share": False}, {"observe_teammates": False, "shaping": 0.1}),
-    "vdn":      ("value", {"mixer": "vdn", "share": True}, {"observe_teammates": True, "shaping": 0.1}),
-    "qmix":     ("value", {"mixer": "qmix", "share": True}, {"observe_teammates": True, "shaping": 0.1}),
-    "ippo":     ("ppo", {"centralized_critic": False, "share": True}, {"observe_teammates": True, "shaping": 0.1}),
-    "mappo":    ("ppo", {"centralized_critic": True, "share": True}, {"observe_teammates": True, "shaping": 0.1}),
+    "iql":      ("value", {"mixer": "none", "reward": "own", "share": False}, {"observe_teammates": False}),
+    "iql_team": ("value", {"mixer": "none", "reward": "team", "share": False}, {"observe_teammates": False}),
+    "vdn":      ("value", {"mixer": "vdn", "share": True}, {"observe_teammates": True}),
+    "qmix":     ("value", {"mixer": "qmix", "share": True}, {"observe_teammates": True}),
+    "ippo":     ("ppo", {"centralized_critic": False, "share": True}, {"observe_teammates": True}),
+    "mappo":    ("ppo", {"centralized_critic": True, "share": True}, {"observe_teammates": True}),
 }
 
 

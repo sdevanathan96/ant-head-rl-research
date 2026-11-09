@@ -63,8 +63,24 @@ class PPOLearner:
         """obs [E, n, d], state [E, S] → actions [E, n], logp [E, n], values [E, 1|n]."""
         o = torch.as_tensor(obs, device=self.device)
         s = torch.as_tensor(state, device=self.device)
-        dist = Categorical(logits=self.actor(o))
-        a = dist.probs.argmax(-1) if greedy else dist.sample()
+        logits = self.actor(o)
+        dist = Categorical(logits=logits)
+        if greedy:
+            a = dist.probs.argmax(-1)
+        else:
+            u = torch.rand_like(logits).clamp(1e-6, 1.0 - 1e-6)
+            gumbel = -torch.log(-torch.log(u))
+            if o.shape[-1] >= 20:
+                holding = (o[..., -5] > 0.5) if o.shape[-1] >= 60 else (o[..., 1] > 0.5)
+                partners = o[..., -4] if o.shape[-1] >= 60 else o[..., 2]
+                shared_g = gumbel[..., :1, :].expand_as(gumbel)
+                g = torch.where(holding.unsqueeze(-1), shared_g, gumbel)
+                waiting = holding & (partners < 0.99)
+                m_logits = logits.clone()
+                m_logits[..., 0] = torch.where(waiting, torch.tensor(-1e8, device=self.device), m_logits[..., 0])
+                a = (m_logits + g).argmax(-1)
+            else:
+                a = dist.sample()
         return a.cpu().numpy(), dist.log_prob(a).cpu().numpy(), self._values(o, s).cpu().numpy()
 
     def update(self, roll: dict) -> dict:
@@ -73,21 +89,20 @@ class PPOLearner:
         c = self.cfg
         T, E = roll["team"].shape
         values = roll["values"]
-        has_own = "rewards" in roll
-        if has_own:
+        if "rewards" in roll:
             step_r = 0.5 * roll["rewards"] + 0.5 * (roll["team"][:, :, None] / self.n)
-            v_agent = np.repeat(values, self.n, axis=-1) if values.shape[-1] == 1 else values
-            last_v_agent = np.repeat(roll["last_values"], self.n, axis=-1) if roll["last_values"].shape[-1] == 1 else roll["last_values"]
-            adv = np.zeros_like(v_agent)
-            gae = np.zeros_like(last_v_agent)
+            v_ag = np.repeat(values, self.n, axis=-1) if values.shape[-1] == 1 else values
+            last_v_ag = np.repeat(roll["last_values"], self.n, axis=-1) if roll["last_values"].shape[-1] == 1 else roll["last_values"]
+            adv = np.zeros_like(v_ag)
+            gae = np.zeros_like(last_v_ag)
             for t in reversed(range(T)):
-                next_v = last_v_agent if t == T - 1 else v_agent[t + 1]
+                next_v = last_v_ag if t == T - 1 else v_ag[t + 1]
                 not_done = (1.0 - roll["done"][t])[:, None]
-                delta = step_r[t] + c.gamma * next_v * not_done - v_agent[t]
+                delta = step_r[t] + c.gamma * next_v * not_done - v_ag[t]
                 gae = delta + c.gamma * c.gae_lambda * not_done * gae
                 adv[t] = gae
-            returns_agent = adv + v_agent
-            returns = returns_agent.mean(axis=-1, keepdims=True) if values.shape[-1] == 1 else returns_agent
+            ret_ag = adv + v_ag
+            returns = ret_ag.mean(axis=-1, keepdims=True) if values.shape[-1] == 1 else ret_ag
         else:
             adv = np.zeros_like(values)
             gae = np.zeros_like(roll["last_values"])
@@ -98,7 +113,6 @@ class PPOLearner:
                 gae = delta + c.gamma * c.gae_lambda * not_done * gae
                 adv[t] = gae
             returns = adv + values
-
         flat = lambda x: torch.as_tensor(x.reshape(T * E, *x.shape[2:]), device=self.device)
         obs, state, actions, old_logp = flat(roll["obs"]), flat(roll["state"]), flat(roll["actions"]), flat(roll["logp"])
         adv_t, ret_t = flat(adv.astype(np.float32)), flat(returns.astype(np.float32))

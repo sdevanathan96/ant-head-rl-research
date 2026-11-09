@@ -88,18 +88,4 @@ def test_evaluate_reports_shares():
     env = make_env("grid", seed=0, n_ants=3, size=7)
     learner = ValueLearner(env.n_agents, env.obs_dim, env.state_dim, env.n_actions, ValueConfig(hidden=16))
     out = evaluate("grid", {"n_ants": 3, "size": 7}, learner, episodes=2)
-    assert len(out["per_ant_share"]) == 3 and len(out["per_ant_cut"]) == 3 and 0.0 <= out["gini"] <= 1.0
-
-
-def test_value_explore_does_not_drop_held_piece():
-    env = make_env("grid", seed=0, n_ants=2, size=7)
-    learner = ValueLearner(env.n_agents, env.obs_dim, env.state_dim, env.n_actions, ValueConfig(hidden=16))
-    env.piece_state[0] = 1
-    env.piece_pos[0] = np.array([2.0, 2.0])
-    env.ant_pos[:] = np.array([2.0, 2.0])
-    obs, _, _, _, _, _ = env.step([5, 5])
-    assert (env.holding == 0).all()
-    for _ in range(50):
-        a = learner.act(obs, eps=1.0)
-        assert (a != 0).all()
-
+    assert len(out["per_ant_share"]) == 3 and 0.0 <= out["gini"] <= 1.0

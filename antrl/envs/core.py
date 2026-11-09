@@ -120,49 +120,8 @@ class ForageEnv:
     def _state(self) -> np.ndarray: raise NotImplementedError
     def _min_spawn_dist(self) -> tuple[float, float]: raise NotImplementedError  # (crumbs, big food)
 
-    def _dist(self, a: np.ndarray, b: np.ndarray) -> float:
-        return float(np.linalg.norm(a - b))
-
     def _dist_to_nest(self, p: np.ndarray) -> float:
-        return self._dist(p, self.nest)
-
-    def _target_pos(self, i: int) -> np.ndarray:
-        """Deterministic task target per ant (constant between task-state transitions)."""
-        c = self.cfg
-        if self.carrying[i]:
-            return self.nest
-        if self.holding[i] >= 0:
-            p = self.holding[i]
-            if len(self.piece_holders[p]) < c.piece_weight:
-                return self.piece_pos[p]
-            return self.nest
-
-        open_pieces = [int(p) for p in np.flatnonzero(self.piece_state == 1)
-                       if len(self.piece_holders[p]) < c.piece_weight]
-        active_bigs = [int(b) for b in np.flatnonzero(self.big_left > 0)
-                       if self.big_progress[b] < self.big_left[b] * c.cut_work]
-        live_crumbs = [int(k) for k in np.flatnonzero(self.crumb_alive)]
-
-        is_coop_ant = (i < c.piece_weight) or not live_crumbs
-        if is_coop_ant:
-            if open_pieces:
-                open_pieces.sort(key=lambda p: (-len(self.piece_holders[p]), p))
-                return self.piece_pos[open_pieces[0]]
-            if active_bigs:
-                return self.big_pos[active_bigs[0]]
-            if live_crumbs:
-                return self.crumb_pos[live_crumbs[i % len(live_crumbs)]]
-        else:
-            waiting = [p for p in open_pieces if len(self.piece_holders[p]) > 0]
-            if waiting and i == c.piece_weight:
-                return self.piece_pos[waiting[0]]
-            if live_crumbs:
-                return self.crumb_pos[live_crumbs[(i - c.piece_weight) % len(live_crumbs)]]
-            if open_pieces:
-                return self.piece_pos[open_pieces[0]]
-            if active_bigs:
-                return self.big_pos[active_bigs[0]]
-        return self.nest
+        return float(np.linalg.norm(p - self.nest))
 
     # ── episode ──────────────────────────────────────────────────────────────
     def reset(self, seed: int | None = None):
@@ -188,6 +147,9 @@ class ForageEnv:
         self.piece_pos = np.zeros((n_pieces, 2))
         self.piece_state = np.zeros(n_pieces, dtype=int)        # 0 uncut · 1 in the world · 2 delivered
         self.piece_holders: list[list[int]] = [[] for _ in range(n_pieces)]
+        self.crumb_best_dist = np.full(c.n_ants, np.inf)
+        self.piece_best_dist = np.full(n_pieces, np.inf)
+        self.piece_grabbed = np.zeros((n_pieces, c.n_ants), dtype=bool)
         self.stats = EpisodeStats(c.n_ants)
         return self._observe_all(), self._state(), {}
 
@@ -199,68 +161,49 @@ class ForageEnv:
         order = self.rng.permutation(self.n_agents)             # fair tie-breaks for shared targets
 
         # 1. WORK: pick up a crumb, cut big food, grab a piece (holders keep holding)
-        targets = [self._target_pos(i).copy() for i in range(self.n_agents)] if c.shaping > 0 else None
-        worked = np.zeros(self.n_agents, dtype=bool)
         for i in order:
-            if actions[i] != WORK:
+            if actions[i] != WORK or self.carrying[i] or self.holding[i] >= 0:
                 continue
-            if self.holding[i] >= 0:
-                p = self.holding[i]
-                if len(self.piece_holders[p]) < c.piece_weight:
-                    worked[i] = True
-                elif c.shaping > 0:
-                    own[i] -= 0.2 * c.shaping
-                continue
-            if self.carrying[i]:
-                continue
-            at_target = True if targets is None else self._near(self.ant_pos[i], targets[i])
             k = self._crumb_here(self.ant_pos[i])
             if k >= 0:
                 self.crumb_alive[k] = False
                 self.carrying[i] = True
-                if at_target:
-                    own[i] += c.shaping
-                worked[i] = True
+                self.crumb_best_dist[i] = self._dist_to_nest(self.ant_pos[i])
+                own[i] += c.shaping
                 continue
             b = self._big_here(self.ant_pos[i])
             if b >= 0:
                 self.big_progress[b] += 1
                 self.stats.cut_work += 1
                 self.stats.per_ant_cut[i] += 1
-                if at_target:
-                    own[i] += 0.5 * c.shaping
-                    worked[i] = True
+                own[i] += 0.5 * c.shaping
                 continue
             p = self._loose_piece_here(self.ant_pos[i])
             if p >= 0:
+                had_holder = len(self.piece_holders[p]) > 0
                 self.piece_holders[p].append(i)
                 self.holding[i] = p
                 self.ant_pos[i] = self.piece_pos[p].copy()
                 self.stats.grabs += 1
-                if at_target:
-                    own[i] += c.shaping
-                worked[i] = True
+                if not self.piece_grabbed[p, i]:
+                    self.piece_grabbed[p, i] = True
+                    own[i] += (2.0 * c.shaping) if had_holder else c.shaping
 
-        # 2. STAY releases a held piece (deduct grab shaping to prevent grab-release farming)
+        # 2. STAY releases a held piece
         for i in range(self.n_agents):
             if actions[i] == STAY and self.holding[i] >= 0:
                 self.piece_holders[self.holding[i]].remove(i)
                 self.holding[i] = -1
-                own[i] -= c.shaping
 
         # 3. free ants (and crumb carriers) walk
         for i in range(self.n_agents):
             if self.holding[i] < 0 and actions[i] in MOVES:
-                old_pos = self.ant_pos[i].copy()
-                new_pos = self._move_ant(old_pos, int(actions[i]))
-                self.ant_pos[i] = new_pos
-                if c.shaping > 0:
-                    if self.carrying[i]:
-                        own[i] += c.shaping * (self._dist_to_nest(old_pos) - self._dist_to_nest(new_pos))
-                    else:
-                        own[i] += 0.5 * c.shaping * (self._dist(old_pos, targets[i]) - self._dist(new_pos, targets[i]))
-            elif c.shaping > 0 and self.holding[i] < 0 and not worked[i]:
-                own[i] -= 0.2 * c.shaping
+                self.ant_pos[i] = self._move_ant(self.ant_pos[i], int(actions[i]))
+                if c.shaping > 0 and self.carrying[i]:
+                    d_now = self._dist_to_nest(self.ant_pos[i])
+                    if d_now < self.crumb_best_dist[i]:
+                        own[i] += 0.5 * c.shaping * (self.crumb_best_dist[i] - d_now)
+                        self.crumb_best_dist[i] = d_now
 
         # 4. pieces move by their holders' pulls
         for p in np.flatnonzero(self.piece_state == 1):
@@ -268,20 +211,19 @@ class ForageEnv:
             pulls = [int(actions[h]) for h in holders if actions[h] in MOVES]
             if not pulls:
                 continue
-            old_piece_pos = self.piece_pos[p].copy()
-            new = self._move_piece(old_piece_pos, pulls)
-            moved = not np.allclose(new, old_piece_pos)
+            new = self._move_piece(self.piece_pos[p], pulls)
+            moved = not np.allclose(new, self.piece_pos[p])
             if moved:
                 self.stats.moving_pulls += len(pulls)
                 if c.shaping > 0:
-                    delta = self._dist_to_nest(old_piece_pos) - self._dist_to_nest(new)
-                    for h in holders:
-                        own[h] += 2.0 * c.shaping * delta
+                    d_now = self._dist_to_nest(new)
+                    if d_now < self.piece_best_dist[p]:
+                        prog = self.piece_best_dist[p] - d_now
+                        self.piece_best_dist[p] = d_now
+                        for h in holders:
+                            own[h] += 2.0 * c.shaping * prog
             else:
                 self.stats.stalled_pulls += len(pulls)
-                if c.shaping > 0:
-                    for h in holders:
-                        own[h] -= 0.2 * c.shaping
             self.piece_pos[p] = new
             for h in holders:
                 self.ant_pos[h] = new.copy()
@@ -294,11 +236,13 @@ class ForageEnv:
                 p = b * c.pieces_per_big + (c.pieces_per_big - 1 - self.big_left[b])
                 self.piece_pos[p] = self._spawn_piece_at(self.big_pos[b])
                 self.piece_state[p] = 1
+                self.piece_best_dist[p] = self._dist_to_nest(self.piece_pos[p])
 
         # 6. deliveries at the nest
         for i in range(self.n_agents):
             if self.carrying[i] and self._at_nest(self.ant_pos[i]):
                 self.carrying[i] = False
+                self.crumb_best_dist[i] = np.inf
                 own[i] += c.crumb_value
                 self.stats.crumbs += 1
                 self.stats.team_value += c.crumb_value
@@ -340,10 +284,12 @@ class ForageEnv:
         return -1
 
     def _loose_piece_here(self, pos) -> int:
-        for p in np.flatnonzero(self.piece_state == 1):
-            if len(self.piece_holders[p]) < self.cfg.piece_weight and self._near(pos, self.piece_pos[p]):
-                return int(p)
-        return -1
+        candidates = [int(p) for p in np.flatnonzero(self.piece_state == 1)
+                      if len(self.piece_holders[p]) < self.cfg.piece_weight and self._near(pos, self.piece_pos[p])]
+        if not candidates:
+            return -1
+        candidates.sort(key=lambda p: (-len(self.piece_holders[p]), p))
+        return candidates[0]
 
     def _all_delivered(self) -> bool:
         return (not self.crumb_alive.any() and not self.carrying.any()
