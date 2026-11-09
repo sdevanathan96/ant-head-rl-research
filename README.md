@@ -119,14 +119,15 @@ VDN sum, per-ant IQL targets, PPO updates for both critics, independent action
 sampling, timeouts as terminal states).
 
 Results are in [RESULTS.md](RESULTS.md). On the grid world, IPPO and MAPPO learn
-the full task, including two-ant transport of every piece, from honest local
-observations: 11.77 and 11.48 of 12 food per episode after 1M steps (3 seeds).
-Earlier results from a target oracle and from hand-coded holder synchronisation
-are withdrawn there.
+the full task, including two-ant transport of nearly every piece, from honest
+local observations: 11.77 and 11.48 of 12 food per episode after 1M steps
+(3 seeds). In the free world they reach 8.55 and 7.85 of 12 at 1M steps and are
+still improving. Earlier results from a target oracle and from hand-coded holder
+synchronisation are withdrawn there.
 
-Next steps: the free world and the value-based learners at 1M steps, more
-seeds, standard MAPPO credit (team reward or per-ant value heads), and recurrent
-agents for the partial views.
+Next steps: the value-based learners at 1M steps, longer free-world training
+with a per-delivery count of holders, more seeds, standard MAPPO credit (team
+reward or per-ant value heads), and recurrent agents for the partial views.
 
 ## References
 
