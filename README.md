@@ -17,8 +17,9 @@ metrics that score the team **and** every ant.
 | What an ant sees | a (2r+1)² window around itself (default r = 2) | the nearest few ants / crumbs / pieces / big food within `sense_radius` |
 | Moving a piece | moves one cell only if **2 holders pull the same way** | moves by the **vector sum** of its holders' pulls ÷ weight: opposite pulls cancel, one ant drags at half speed |
 
-Every ant also knows its own load and the direction home (ants path-integrate
-back to the nest), and can feel whether a partner is holding its piece.
+Every ant also knows its own load, the direction home (ants path-integrate
+back to the nest) and the time step, and can feel whether a partner is holding
+its piece. Nothing in an observation points to food or assigns a role.
 
 **The four jobs** (identical rules in both worlds):
 
@@ -29,11 +30,19 @@ back to the nest), and can feel whether a partner is holding its piece.
 
 **Actions**: `STAY` (also lets go of a held piece) · `NORTH` `SOUTH` `EAST` `WEST` (walk, or pull a held piece) · `WORK` (pick up a crumb / cut / grab a piece / keep holding).
 
+**Optional mechanics** (off by default, set with `--env`):
+
+| Switch | Effect |
+|---|---|
+| `hold_on_stay=true` | `STAY` keeps hold of a piece; a 7th action, `DROP`, lets go |
+| `feel_tug=true` | each holder also senses its partners' pull directions from the last step, through the load (+2 features) |
+
 **Rewards**: each step returns a reward per ant (credited to whoever earned it:
 the crumb carrier, or the piece's holders split evenly) and a team reward equal
 to their sum. Default values: crumb 1, piece 2, so the maximum per episode is
-4 crumbs + 4 pieces = 12. Optional `shaping` adds small bonuses for pickups,
-cuts and grabs.
+4 crumbs + 4 pieces = 12. Optional `shaping` adds small bonuses for pickups and
+cuts, a grab bonus paid once per ant per piece, and progress credit when a
+carried crumb or piece reaches a new closest distance to the nest.
 
 ## The learners
 
@@ -47,8 +56,11 @@ cuts and grabs.
 | `mappo` | 2 · loosened | shared policy | team | sensed | PPO, centralised critic V(s) (Yu et al. 2022) |
 
 Value-based learners use replay, double-Q targets and periodically synced target
-networks. PPO learners use GAE, clipped objectives and parallel environments.
-Acting is always decentralised: each ant uses only its own observation.
+networks. PPO learners use GAE (advantage on `0.5·own + 0.5·team/n` reward),
+clipped objectives and parallel environments; a timeout ends the episode, since
+the time step is observed. Acting is always decentralised: each ant uses only
+its own observation and samples its own action. Shared networks get a one-hot
+ant id by default (`--set agent_id=false` removes it).
 
 ## What gets measured
 
@@ -68,6 +80,9 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 # stage 1 baseline, then a loosened learner, on the grid world
 .venv/bin/python -m antrl.train --world grid --algo iql  --steps 300000
 .venv/bin/python -m antrl.train --world grid --algo qmix --steps 300000
+
+# the main result in RESULTS.md: IPPO learns cooperative transport in ~6 min
+.venv/bin/python -m antrl.train --world grid --algo ippo --steps 1000000 --eval-every 100000 --eval-episodes 50 --env shaping=0.1
 
 # free world, MAPPO, with reward shaping and 3 ants
 .venv/bin/python -m antrl.train --world free --algo mappo --steps 500000 --env shaping=0.1 n_ants=3
@@ -97,16 +112,21 @@ tests/                     environment mechanics and algorithm checks
 
 ## Status
 
-Implementation stage. The environments and all six learners run end to end,
-and the test suite checks the mechanics (cutting, same-direction and
-force-summed transport, delivery credit, partial views) and the algorithms
-(QMIX monotonicity, VDN sum, per-ant IQL targets, PPO updates for both
-critics). First results are in [RESULTS.md](RESULTS.md): every learner learns
-to forage crumbs, and none yet learns to carry a piece together.
+The environments and all six learners run end to end. The test suite checks the
+mechanics (cutting, same-direction and force-summed transport, delivery credit,
+partial views, the optional switches) and the algorithms (QMIX monotonicity,
+VDN sum, per-ant IQL targets, PPO updates for both critics, independent action
+sampling, timeouts as terminal states).
 
-Next steps from the research plan: longer multi-seed comparisons, recurrent
-agents for the partial views, and a curriculum (or shaping schedule) for the
-sparse cooperative jobs.
+Results are in [RESULTS.md](RESULTS.md). On the grid world, IPPO and MAPPO learn
+the full task, including two-ant transport of every piece, from honest local
+observations: 11.77 and 11.48 of 12 food per episode after 1M steps (3 seeds).
+Earlier results from a target oracle and from hand-coded holder synchronisation
+are withdrawn there.
+
+Next steps: the free world and the value-based learners at 1M steps, more
+seeds, standard MAPPO credit (team reward or per-ant value heads), and recurrent
+agents for the partial views.
 
 ## References
 
