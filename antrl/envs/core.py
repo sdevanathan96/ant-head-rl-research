@@ -65,6 +65,9 @@ class EpisodeStats:
     grabs: int = 0
     stalled_pulls: int = 0         # holder-steps spent pulling a piece that did not move
     moving_pulls: int = 0          # holder-steps spent pulling a piece that moved
+    pieces_paired: int = 0         # delivered pieces moved at least half their path by 2+ pullers at once
+    carry_team: float = 0.0        # piece path length moved by 2+ pullers in the same step (world units)
+    carry_solo: float = 0.0        # piece path length moved by a single puller (free world: half speed)
     per_ant_value: np.ndarray = field(default=None)
     per_ant_cut: np.ndarray = field(default=None)
 
@@ -82,6 +85,9 @@ class EpisodeStats:
             "grabs": self.grabs,
             "stalled_pulls": self.stalled_pulls,
             "moving_pulls": self.moving_pulls,
+            "pieces_paired": self.pieces_paired,
+            "carry_team": self.carry_team,
+            "carry_solo": self.carry_solo,
             "per_ant_value": self.per_ant_value.tolist(),
             "per_ant_cut": self.per_ant_cut.tolist(),
             "per_ant_share": share.tolist(),
@@ -160,6 +166,7 @@ class ForageEnv:
         self.crumb_best_dist = np.full(c.n_ants, np.inf)
         self.piece_best_dist = np.full(n_pieces, np.inf)
         self.piece_grabbed = np.zeros((n_pieces, c.n_ants), dtype=bool)
+        self.piece_carry = np.zeros((n_pieces, 2))              # path moved by [one puller, 2+ pullers]
         self.tug = np.zeros((c.n_ants, 2))
         self.stats = EpisodeStats(c.n_ants)
         return self._observe_all(), self._state(), {}
@@ -231,6 +238,13 @@ class ForageEnv:
             moved = not np.allclose(new, self.piece_pos[p])
             if moved:
                 self.stats.moving_pulls += len(pulls)
+                step_len = float(np.linalg.norm(new - self.piece_pos[p]))
+                team = len(pulls) >= 2
+                self.piece_carry[p, int(team)] += step_len
+                if team:
+                    self.stats.carry_team += step_len
+                else:
+                    self.stats.carry_solo += step_len
                 if c.shaping > 0:
                     d_now = self._dist_to_nest(new)
                     if d_now < self.piece_best_dist[p]:
@@ -273,6 +287,9 @@ class ForageEnv:
                 self.piece_holders[p] = []
                 self.piece_state[p] = 2
                 self.stats.pieces += 1
+                solo, team = self.piece_carry[p]
+                if team > 0 and team >= solo:
+                    self.stats.pieces_paired += 1
                 self.stats.team_value += c.piece_value
 
         self.t += 1

@@ -89,7 +89,8 @@ def evaluate(world: str, env_kw: dict, learner, episodes: int = 20, seed: int = 
             obs, state, _, _, done, info = env.step(a)
         summaries.append(info["episode"])
     out = {key: float(np.mean([s[key] for s in summaries]))
-           for key in ("team_value", "crumbs", "pieces", "cut_work", "grabs", "stalled_pulls", "moving_pulls", "gini")}
+           for key in ("team_value", "crumbs", "pieces", "pieces_paired", "cut_work", "grabs",
+                       "stalled_pulls", "moving_pulls", "carry_team", "carry_solo", "gini")}
     out["team_value_std"] = float(np.std([s["team_value"] for s in summaries]))
     out["per_ant_share"] = np.mean([s["per_ant_share"] for s in summaries], axis=0).round(3).tolist()
     out["per_ant_cut"] = np.mean([s["per_ant_cut"] for s in summaries], axis=0).round(3).tolist()
@@ -104,7 +105,9 @@ def train_value(env, learner: ValueLearner, steps: int, on_eval, eval_every: int
         eps = learner.epsilon(step)
         actions = learner.act(obs, eps)
         next_obs, next_state, rewards, team, done, info = env.step(actions)
-        learner.store(obs, state, actions, rewards, team, next_obs, next_state, float(info["terminated"]))
+        # A timeout is terminal, as in train_ppo: t / max_steps is observed, so the last
+        # observation of an episode is never the start of more reward.
+        learner.store(obs, state, actions, rewards, team, next_obs, next_state, float(done))
         obs, state = next_obs, next_state
         if done:
             obs, state, _ = env.reset()

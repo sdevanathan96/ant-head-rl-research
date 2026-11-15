@@ -111,6 +111,18 @@ def test_agent_id_switch():
     assert torch.allclose(without(obs)[:, 0], without(obs)[:, 1])       # identical obs -> identical output
 
 
+def test_value_replay_treats_timeouts_as_terminal():
+    """Same rule as PPO: a timeout transition is stored with terminal = 1."""
+    from antrl.train import train_value
+    env = make_env("grid", seed=0, max_steps=5, n_ants=2, size=7)
+    learner = ValueLearner(env.n_agents, env.obs_dim, env.state_dim, env.n_actions,
+                           ValueConfig(hidden=16, learning_starts=10**9))
+    seen = []
+    learner.store = lambda *t: seen.append(t[-1])
+    train_value(env, learner, steps=10, on_eval=lambda *a: None, eval_every=10**9)
+    assert seen == [0, 0, 0, 0, 1] * 2
+
+
 def test_ppo_rollout_treats_timeouts_as_terminal():
     """t / max_steps is observed, so a timeout must end the GAE trace (done = 1)."""
     from antrl.train import train_ppo
@@ -127,3 +139,49 @@ def test_ppo_rollout_treats_timeouts_as_terminal():
     learner.update = capture
     train_ppo("grid", env_kw, learner, steps=10, seed=0, on_eval=lambda *a: None, eval_every=10**9)
     assert seen["done"] == [0, 0, 0, 0, 1] * 2
+
+
+def _credit_roll(learner, env, T=8, E=2, own=None, seed=0):
+    rng = np.random.default_rng(seed)
+    n = env.n_agents
+    obs = rng.random((T, E, n, env.obs_dim)).astype(np.float32)
+    state = rng.random((T, E, env.state_dim)).astype(np.float32)
+    a, logp, v = learner.act(obs.reshape(T * E, n, -1), state.reshape(T * E, -1))
+    k = v.shape[-1]
+    own = rng.random((T, E, n)).astype(np.float32) if own is None else own
+    return {"obs": obs, "state": state, "actions": a.reshape(T, E, n), "logp": logp.reshape(T, E, n),
+            "values": v.reshape(T, E, k), "rewards": own, "team": own.sum(-1),
+            "done": np.ones((T, E), np.float32), "last_values": v.reshape(T, E, k)[-1]}
+
+
+def test_team_credit_ignores_how_the_team_reward_is_split():
+    """credit=team: only the team total matters; credit=blend: the per-ant split matters too."""
+    env = make_env("grid", seed=0, n_ants=2, size=7)
+    T, E = 8, 2
+    even = np.full((T, E, 2), 0.5, np.float32)
+    lopsided = np.stack([np.ones((T, E)), np.zeros((T, E))], -1).astype(np.float32)
+    for credit, should_match in (("team", True), ("blend", False)):
+        params = []
+        for own in (even, lopsided):
+            learner = PPOLearner(env.n_agents, env.obs_dim, env.state_dim, env.n_actions,
+                                 PPOConfig(hidden=16, credit=credit), seed=0)
+            roll = _credit_roll(learner, env, T, E, own=own)
+            torch.manual_seed(1)
+            learner.update(roll)
+            params.append(torch.cat([p.flatten() for p in learner.params]))
+        assert torch.equal(params[0], params[1]) == should_match
+
+
+def test_per_ant_critic_heads_fit_each_ants_own_return():
+    env = make_env("grid", seed=0, n_ants=2, size=7)
+    learner = PPOLearner(env.n_agents, env.obs_dim, env.state_dim, env.n_actions,
+                         PPOConfig(hidden=32, critic_per_ant=True, lr=5e-3), seed=0)
+    T, E = 8, 2
+    own = np.stack([np.ones((T, E)), np.zeros((T, E))], -1).astype(np.float32)   # only ant 0 earns
+    for _ in range(40):
+        learner.update(_credit_roll(learner, env, T, E, own=own))
+    roll = _credit_roll(learner, env, T, E, own=own)
+    v = roll["values"]
+    assert v.shape[-1] == 2
+    # episodes end every step, so the targets are 0.5·own + 0.5·team/n = 0.75 for ant 0, 0.25 for ant 1
+    assert abs(v[..., 0].mean() - 0.75) < 0.1 and abs(v[..., 1].mean() - 0.25) < 0.1

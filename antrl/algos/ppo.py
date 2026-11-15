@@ -7,6 +7,15 @@ TEAM reward. They differ in the critic:
     IPPO   a decentralised critic V(o_i) on each ant's own view
 
 Acting is decentralised in both: each ant samples from π(a | o_i).
+
+Credit (how the reward becomes each ant's advantage):
+
+    credit="blend"  (default) each ant's return mixes its own reward with an equal share of the
+                    team's: 0.5·own_i + 0.5·team/n. With MAPPO's single V(s) the critic fits the
+                    mean of these per-ant returns.
+    credit="team"   standard MAPPO: every ant gets the same advantage from the team reward
+                    (scaled by 1/n, the mean per-ant reward, so the critic's loss scale matches).
+    critic_per_ant  MAPPO only: V(s) has one output per ant, each fitted to that ant's own return.
 """
 from __future__ import annotations
 
@@ -37,6 +46,8 @@ class PPOConfig:
     rollout_steps: int = 128          # steps per env per update
     num_envs: int = 8
     agent_id: bool = True             # append a one-hot ant id to shared networks
+    credit: str = "blend"             # blend | team (see module docstring)
+    critic_per_ant: bool = False      # MAPPO: one V(s) output per ant instead of one shared value
 
 
 class PPOLearner:
@@ -46,15 +57,18 @@ class PPOLearner:
         self.n, self.device = n_agents, torch.device(device)
         torch.manual_seed(seed)
         self.actor = AgentNet(obs_dim, n_actions, n_agents, cfg.hidden, cfg.share, cfg.agent_id).to(self.device)
+        if cfg.credit not in ("blend", "team"):
+            raise ValueError(f"unknown credit {cfg.credit!r} (expected 'blend' or 'team')")
         if cfg.centralized_critic:
-            self.critic: nn.Module = mlp(state_dim, cfg.hidden, 1).to(self.device)
+            heads = n_agents if cfg.critic_per_ant else 1
+            self.critic: nn.Module = mlp(state_dim, cfg.hidden, heads).to(self.device)
         else:
             self.critic = AgentNet(obs_dim, 1, n_agents, cfg.hidden, cfg.share, cfg.agent_id).to(self.device)
         self.params = list(self.actor.parameters()) + list(self.critic.parameters())
         self.opt = torch.optim.Adam(self.params, lr=cfg.lr, eps=1e-5)
 
     def _values(self, obs: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
-        """[..., 1] (centralised) or [..., n] (decentralised)."""
+        """[..., 1] (centralised) or [..., n] (decentralised, or centralised with critic_per_ant)."""
         if self.cfg.centralized_critic:
             return self.critic(state)
         return self.critic(obs).squeeze(-1)
@@ -70,34 +84,29 @@ class PPOLearner:
 
     def update(self, roll: dict) -> dict:
         """roll: obs [T,E,n,d], state [T,E,S], actions/logp [T,E,n], team [T,E], done [T,E],
-        values [T,E,k], last_values [E,k]  (k = 1 for MAPPO, n for IPPO)."""
+        values [T,E,k], last_values [E,k]  (k = 1 for MAPPO, n for IPPO or critic_per_ant).
+        Without per-ant "rewards" in the roll, the team credit is used."""
         c = self.cfg
         T, E = roll["team"].shape
         values = roll["values"]
-        if "rewards" in roll:
-            step_r = 0.5 * roll["rewards"] + 0.5 * (roll["team"][:, :, None] / self.n)
-            v_ag = np.repeat(values, self.n, axis=-1) if values.shape[-1] == 1 else values
-            last_v_ag = np.repeat(roll["last_values"], self.n, axis=-1) if roll["last_values"].shape[-1] == 1 else roll["last_values"]
-            adv = np.zeros_like(v_ag)
-            gae = np.zeros_like(last_v_ag)
-            for t in reversed(range(T)):
-                next_v = last_v_ag if t == T - 1 else v_ag[t + 1]
-                not_done = (1.0 - roll["done"][t])[:, None]
-                delta = step_r[t] + c.gamma * next_v * not_done - v_ag[t]
-                gae = delta + c.gamma * c.gae_lambda * not_done * gae
-                adv[t] = gae
-            ret_ag = adv + v_ag
-            returns = ret_ag.mean(axis=-1, keepdims=True) if values.shape[-1] == 1 else ret_ag
+        k = values.shape[-1]
+        if c.credit == "team" or "rewards" not in roll:
+            step_r = np.repeat(roll["team"][:, :, None] / self.n, k, axis=-1)          # [T,E,k]
         else:
-            adv = np.zeros_like(values)
-            gae = np.zeros_like(roll["last_values"])
-            for t in reversed(range(T)):
-                next_v = roll["last_values"] if t == T - 1 else values[t + 1]
-                not_done = (1.0 - roll["done"][t])[:, None]
-                delta = roll["team"][t][:, None] + c.gamma * next_v * not_done - values[t]
-                gae = delta + c.gamma * c.gae_lambda * not_done * gae
-                adv[t] = gae
-            returns = adv + values
+            step_r = 0.5 * roll["rewards"] + 0.5 * (roll["team"][:, :, None] / self.n)  # [T,E,n]
+        reps = step_r.shape[-1] // k                     # 1-output critic + per-ant returns → repeat
+        v_ag = np.repeat(values, reps, axis=-1)
+        last_v_ag = np.repeat(roll["last_values"], reps, axis=-1)
+        adv = np.zeros_like(v_ag)
+        gae = np.zeros_like(last_v_ag)
+        for t in reversed(range(T)):
+            next_v = last_v_ag if t == T - 1 else v_ag[t + 1]
+            not_done = (1.0 - roll["done"][t])[:, None]
+            delta = step_r[t] + c.gamma * next_v * not_done - v_ag[t]
+            gae = delta + c.gamma * c.gae_lambda * not_done * gae
+            adv[t] = gae
+        ret_ag = adv + v_ag
+        returns = ret_ag.mean(axis=-1, keepdims=True) if k == 1 else ret_ag
         flat = lambda x: torch.as_tensor(x.reshape(T * E, *x.shape[2:]), device=self.device)
         obs, state, actions, old_logp = flat(roll["obs"]), flat(roll["state"]), flat(roll["actions"]), flat(roll["logp"])
         adv_t, ret_t = flat(adv.astype(np.float32)), flat(returns.astype(np.float32))

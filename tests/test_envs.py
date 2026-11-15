@@ -220,3 +220,38 @@ def test_feel_tug_senses_only_partner_pulls_through_the_load():
     assert np.allclose(obs[0][-2:], [0.0, 0.0])      # ant 0 does not feel its own pull
     env.step([STAY, STAY])                           # ant 0 lets go
     assert np.allclose(env._tug_features(1), [0.0, 0.0])
+
+
+def _free_pair_on_piece(pos):
+    env = FreeForage(FreeConfig(n_ants=2, heading_noise=0.0, speed=0.5), seed=0)
+    env.reset(seed=0)
+    env.piece_state[0] = 1
+    env.piece_pos[0] = np.array(pos, dtype=float)
+    place(env, 0, pos)
+    place(env, 1, pos)
+    env.step([WORK, WORK])
+    return env
+
+
+def test_carry_split_counts_team_and_solo_pulls():
+    env = _free_pair_on_piece([3.0, 3.0])
+    env.step([EAST, EAST])                          # 2 pullers: 0.5 of team carry
+    env.step([EAST, WORK])                          # 1 puller (partner only holds): 0.25 solo
+    assert env.stats.carry_team == pytest.approx(0.5)
+    assert env.stats.carry_solo == pytest.approx(0.25)
+
+
+def test_pieces_paired_separates_pair_carries_from_solo_drags():
+    start = [4.0 - 0.3, 5.0]                        # nest is (5, 5), radius 1: start just outside it
+    paired = _free_pair_on_piece(start)
+    assert np.allclose(paired.nest, [5.0, 5.0])
+    paired.step([EAST, EAST])
+    assert paired.stats.pieces == 1 and paired.stats.pieces_paired == 1
+    dragged = _free_pair_on_piece(start)
+    dragged.step([EAST, WORK])
+    dragged.step([EAST, WORK])
+    assert dragged.stats.pieces == 1 and dragged.stats.pieces_paired == 0
+    g = grid()                                      # on the grid every move needs 2 pullers
+    _two_holders_on_a_piece(g, g.nest + [-1, 0])
+    g.step([EAST, EAST])
+    assert g.stats.pieces == 1 and g.stats.pieces_paired == 1 and g.stats.carry_solo == 0
