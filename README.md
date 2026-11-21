@@ -1,13 +1,47 @@
 # Training Ants to Work Together — RL Environments
 
+## Contributors
+
+| Name | Role |
+|---|---|
+| Sudhanva Devanathan | Environments, learners, training and evaluation |
+
+## Project brief
+
 Multi-agent reinforcement learning for ant-like foraging. A colony of ant agents
 learns to forage first **alone** (independent learners), then with **loosened
 policies** that train together but still act alone (centralised training,
 decentralised execution).
 
-This repo implements the plan from the project's research-stage update:
-two worlds, four jobs, a stage-1 baseline, stage-2 cooperative learners, and
-metrics that score the team **and** every ant.
+The project has two worlds (a grid and a continuous arena) with the same four
+jobs, a stage-1 baseline of independent learners, stage-2 cooperative learners,
+and metrics that score the team **and** every ant.
+
+## Problem statement
+
+Ants move food too heavy for one ant by carrying it together, each acting on
+what it senses around itself (Feinerman et al. 2018). Can agents that see only
+their own surroundings learn this from reward alone, with no role assigned and
+no scripted coordination? And which multi-agent learners manage it?
+
+Team food alone can't answer the second question. Where one ant can drag a load
+by itself, ants that ignore each other score nearly as well as ants that
+cooperate. So the project also measures whether each piece was actually carried
+by two ants, and what the two holders do step by step.
+
+## End goal
+
+- Environments in which cooperative transport has to be learned: nothing in an
+  observation points to food or assigns a role, and no holder behaviour is
+  hand-coded.
+- A fair comparison, over several seeds and in both worlds, of independent
+  learners (IQL) against cooperative ones (VDN, QMIX, IPPO, MAPPO).
+- Metrics that separate cooperation from solo effort (paired pieces, the
+  team/solo carry split, each ant's share and its Gini), and an account of how
+  the learned pairs coordinate.
+- Success: learners that come close to the maximum score from local
+  observations, with the paired-piece count confirming two-ant transport, and
+  results that anyone can reproduce from this folder.
 
 ## The worlds
 
@@ -76,6 +110,9 @@ Every evaluation (greedy policy, held-out seeds) reports:
 - `per_ant_share` and `gini`: each ant's share of the delivered value, and its inequality (0 = equal; high = some ants coast while others haul)
 
 ## Quick start
+
+Run every command from this folder (`projects/learning-environments/ant-foraging/`).
+The results were produced on CPU with Python 3.14.7, PyTorch 2.15.0 and NumPy 2.5.4.
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
@@ -161,11 +198,14 @@ What the numbers show:
 
 | Date | Commit | What happened |
 |---|---|---|
-| Nov 1 | `a3196e4`, `a216048` | Built both worlds, the six learners and the metrics. First results: every learner foraged crumbs, none carried a piece (best: MAPPO 3.50 / 12). |
-| Nov 1 | `1166e33` | Reported 12 / 12 for QMIX, IPPO and MAPPO. **Withdrawn:** a target oracle in the observation gave each ant a role and a step direction. |
-| Nov 8 | `e7cfa42` | Removed the oracle and fixed reward farming in the shaping. Its transport results relied on hand-coded holder synchronisation and are **superseded**. |
-| Nov 8 | `e478b7b` | Fixed the PPO timeout bug, the main blocker, and removed the hand-coded synchronisation. IPPO and MAPPO learn transport honestly: grid 11.77 and 11.48 at 1M steps. |
-| Nov 15 | this update | All six learners at 1M steps in both worlds, with a timeout fix for the value-based learners. Added the paired-carry metric, the coordination analysis, the MAPPO credit variants, 3M-step free-world runs, and 5 seeds for IPPO and MAPPO. |
+| Nov 1 | `600355b`, `db2195c` | Built both worlds, the six learners and the metrics. First results: every learner foraged crumbs, none carried a piece (best: MAPPO 3.50 / 12). |
+| Nov 1 | `bfe4eb3` | Reported 12 / 12 for QMIX, IPPO and MAPPO. **Withdrawn:** a target oracle in the observation gave each ant a role and a step direction. |
+| Nov 8 | `e5295c0` | Removed the oracle and fixed reward farming in the shaping. Its transport results relied on hand-coded holder synchronisation and are **superseded**. |
+| Nov 8 | `518d820` | Fixed the PPO timeout bug, the main blocker, and removed the hand-coded synchronisation. IPPO and MAPPO learn transport honestly: grid 11.77 and 11.48 at 1M steps. |
+| Nov 15 | `3c4e2f3` | All six learners at 1M steps in both worlds, with a timeout fix for the value-based learners. Added the paired-carry metric, the coordination analysis, the MAPPO credit variants, 3M-step free-world runs, and 5 seeds for IPPO and MAPPO. |
+| Nov 20 | `d013f33` | Moved into this repo with its full history. Added the contributor, problem and goal sections, the work log, and the evaluation files behind every table. |
+
+The project started in a personal repository, `sdevanathan96/ant-head-rl-research`. Its history was imported with every file moved into this folder. Messages, authors and dates are unchanged, but the commit IDs differ, so the IDs above are this repo's. Older commit messages still cite the original IDs; [WORK_PROGRESS.md](WORK_PROGRESS.md) lists both.
 
 ### Next steps
 

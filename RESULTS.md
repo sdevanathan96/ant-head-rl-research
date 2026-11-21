@@ -18,7 +18,7 @@
 - **MAPPO credit.**
   - One value output per ant gives the best MAPPO on the grid (11.75 ± 0.11) and learns faster.
   - Training on the team reward alone is slower on the grid and much worse in the free world (4.14 vs 7.85).
-- **Earlier results stay withdrawn.** The results that relied on a target oracle (`1166e33`) or on hand-coded holder synchronisation (`e7cfa42`) are withdrawn (§10).
+- **Earlier results stay withdrawn.** The results that relied on a target oracle (`bfe4eb3`) or on hand-coded holder synchronisation (`e5295c0`) are withdrawn (§10).
 
 ## 1. Setup
 
@@ -107,7 +107,7 @@ Each cell shows team food (/12), with pieces delivered (/4) in parentheses.
 
 - **Order of learning.** Crumb foraging is learned first. On the grid, piece transport takes off between 100k and 300k steps for PPO; in the free world it starts later (300k–500k).
 - **Exploration timing.** The value-based learners finish annealing ε at 100k steps and start moving pieces after about 300k.
-- **Short runs mislead.** The protocol before `e478b7b` stopped at 150k steps, which is too short: at 150k, seeds of the same variant ranged from 0.05 to 2.35 pieces (§9).
+- **Short runs mislead.** The protocol before `518d820` stopped at 150k steps, which is too short: at 150k, seeds of the same variant ranged from 0.05 to 2.35 pieces (§9).
 
 ## 4. Which pieces are carried in pairs (free world)
 
@@ -190,24 +190,24 @@ Seeds 0–2, 1M steps. Per-seed team food:
 
 ## 8. What changed
 
-### 8.1 Fixes from `e478b7b` (kept)
+### 8.1 Fixes from `518d820` (kept)
 
 1. **Timeouts end the episode** (`antrl/train.py`, `train_ppo`).
-   - `e7cfa42` stored `done = terminated` and left timeouts out. GAE then bootstrapped through the timeout into the value of the *next* episode's reset state, because the observation had already been replaced by `env.reset()`.
+   - `e5295c0` stored `done = terminated` and left timeouts out. GAE then bootstrapped through the timeout into the value of the *next* episode's reset state, because the observation had already been replaced by `env.reset()`.
    - Since `t / max_steps` is in every observation and in the global state, a timeout is a true terminal state of a finite-horizon task, and `done = terminated or truncated` is correct.
    - Until a team clears all the food, every episode ends by timeout, and transport happens late in an episode, so this bug hit transport hardest.
-2. **Hand-coded holder synchronisation removed.** All of these were added in `e7cfa42`:
+2. **Hand-coded holder synchronisation removed.** All of these were added in `e5295c0`:
    - The observation rewrite of a fully held piece as "carrying a crumb", and the blanked ant id while holding.
    - Shared Gumbel noise among holders and a STAY mask during PPO training. The mask also made the stored `log π(a)` inconsistent with the action actually sampled.
    - Shared random pulls in value-based exploration.
 
    Each ant now samples independently, and the network uses the observation as given.
-3. **Kept: the `e7cfa42` environment shaping changes.**
+3. **Kept: the `e5295c0` environment shaping changes.**
    - The grab bonus is paid at most once per ant per piece.
    - Carried crumbs and pieces earn shaping only when they reach a new closest distance to the nest.
    - A second ant pressing WORK on a shared cell joins the piece that already has a holder.
 
-### 8.2 This update
+### 8.2 Nov 15 update (`3c4e2f3`)
 
 1. **Value-based learners also treat a timeout as terminal** (`train_value`). They used to store `terminal = terminated`, which bootstrapped into the final observation (t / max_steps = 1), an observation the network is never trained on. Unlike PPO, they stored the true next observation, so the reset-state bug never applied to them. Test: `test_value_replay_treats_timeouts_as_terminal`.
 2. **Holder metrics in every evaluation:** `pieces_paired`, `carry_team`, `carry_solo` (§4). Tests: `test_carry_split_counts_team_and_solo_pulls`, `test_pieces_paired_separates_pair_carries_from_solo_drags`.
@@ -229,15 +229,15 @@ Seeds 0–2, 1M steps. Per-seed team food:
 | `--set credit=team` | PPO advantage from the team reward only (§7) |
 | `--set critic_per_ant=true` | MAPPO critic with one output per ant (§7) |
 
-## 9. Ablations at 150k steps (from `e478b7b`; 3 seeds, 20 held-out episodes)
+## 9. Ablations at 150k steps (from `518d820`; 3 seeds, 20 held-out episodes)
 
 These are short runs. At this budget, seeds of one variant spread widely, so treat differences under about 1 piece as noise.
 
-**9a. How much of `e7cfa42`'s result came from hand-coded syncing.** Each part was switched off in a patched copy of `e7cfa42`; the timeout bug is present in all rows.
+**9a. How much of `e5295c0`'s result came from hand-coded syncing.** Each part was switched off in a patched copy of `e5295c0`; the timeout bug is present in all rows.
 
 | Variant | IPPO team | IPPO pieces | MAPPO team | MAPPO pieces |
 |---|---:|---:|---:|---:|
-| `e7cfa42` as committed | 8.00 | 2.28 | 5.37 | 1.30 |
+| `e5295c0` as committed | 8.00 | 2.28 | 5.37 | 1.30 |
 | shared exploration noise and STAY mask off | 6.88 | 1.73 | 5.00 | 1.15 |
 | observation rewrite and id blanking off | 7.47 | 1.95 | 4.18 | 0.37 |
 | both off | 4.33 | 0.23 | 3.97 | 0.43 |
@@ -247,19 +247,19 @@ These are short runs. At this budget, seeds of one variant spread widely, so tre
 | Variant | IPPO team | IPPO pieces | MAPPO team | MAPPO pieces |
 |---|---:|---:|---:|---:|
 | honest, with the timeout bug | 4.33 | 0.23 | 3.97 | 0.43 |
-| **+ timeout fix (= the default since `e478b7b`)** | **6.20** | **1.30** | **5.83** | **1.20** |
+| **+ timeout fix (= the default since `518d820`)** | **6.20** | **1.30** | **5.83** | **1.20** |
 | + `hold_on_stay` | 5.23 | 0.80 | 5.03 | 1.15 |
 | + `hold_on_stay`, no agent id | 5.78 | 1.32 | 4.92 | 1.03 |
 | + `hold_on_stay`, `feel_tug` | 6.08 | 1.25 | 5.28 | 0.87 |
 | + all three | 3.73 | 0.65 | 5.65 | 1.42 |
 
-The timeout fix alone puts honest MAPPO above `e7cfa42`'s hand-coded MAPPO at the same budget (5.83 vs 5.37).
+The timeout fix alone puts honest MAPPO above `e5295c0`'s hand-coded MAPPO at the same budget (5.83 vs 5.37).
 
 ## 10. Corrections to earlier results
 
-- **`1166e33` ("Improved / ANT-3", 12.00 / 12 for QMIX, IPPO and MAPPO): withdrawn.** That commit's `_target_pos` assigned roles by ant index (ants 0–1 carry, the rest collect crumbs) and put a one-step direction to each ant's target into its observation (`step_dir`). A scripted policy that just follows that direction, with no learning, scores 12/12 in 100 of 100 episodes in both worlds.
-- **`e7cfa42` ("Genuine Learned", IPPO 8.00 / MAPPO 5.37 at 150k): superseded.** The oracle was gone, but most of the transport came from hand-coded holder synchronisation (§9a), and the timeout bug was present.
-- **Original-code baseline (`a216048`, 150k steps), still valid as the starting point:** grid IPPO 2.52 / 12 with 0 pieces, grid MAPPO 3.42 / 12 with 0 pieces, free MAPPO 0.10 / 12 (1 seed).
+- **`bfe4eb3` ("Improved / ANT-3", 12.00 / 12 for QMIX, IPPO and MAPPO): withdrawn.** That commit's `_target_pos` assigned roles by ant index (ants 0–1 carry, the rest collect crumbs) and put a one-step direction to each ant's target into its observation (`step_dir`). A scripted policy that just follows that direction, with no learning, scores 12/12 in 100 of 100 episodes in both worlds.
+- **`e5295c0` ("Genuine Learned", IPPO 8.00 / MAPPO 5.37 at 150k): superseded.** The oracle was gone, but most of the transport came from hand-coded holder synchronisation (§9a), and the timeout bug was present.
+- **Original-code baseline (`db2195c`, 150k steps), still valid as the starting point:** grid IPPO 2.52 / 12 with 0 pieces, grid MAPPO 3.42 / 12 with 0 pieces, free MAPPO 0.10 / 12 (1 seed).
 
 ## 11. Limitations and open items
 
@@ -279,7 +279,7 @@ The timeout fix alone puts honest MAPPO above `e7cfa42`'s hand-coded MAPPO at th
   - 5 seeds for IPPO and MAPPO at 1M steps; 3 for everything else.
   - Final numbers come from one checkpoint per seed.
   - The credit variants' free-world differences between the blend and per-ant outputs are within the seed spread.
-- **No equal-budget comparison** with `e7cfa42` at 1M steps.
+- **No equal-budget comparison** with `e5295c0` at 1M steps.
 
 ## 12. Reproduce
 
@@ -312,4 +312,4 @@ done
 .venv/bin/python scripts/compare.py runs/fix-compare
 ```
 
-§9a used one-off patches of `e7cfa42` that are not part of the repo. In §9b, the "+ `hold_on_stay`" and "+ `hold_on_stay`, `feel_tug`" rows map directly onto the switches. The two no-agent-id rows zeroed the id input rather than removing it, so they will not reproduce bit for bit.
+§9a used one-off patches of `e5295c0` that are not part of the repo. In §9b, the "+ `hold_on_stay`" and "+ `hold_on_stay`, `feel_tug`" rows map directly onto the switches. The two no-agent-id rows zeroed the id input rather than removing it, so they will not reproduce bit for bit.
