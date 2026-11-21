@@ -128,8 +128,9 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 # free world, MAPPO, with reward shaping and 3 ants
 .venv/bin/python -m antrl.train --world free --algo mappo --steps 500000 --env shaping=0.1 n_ants=3
 
-# summarise every run under runs/
+# summarise every run under runs/, or the committed results behind RESULTS.md
 .venv/bin/python scripts/compare.py runs/
+.venv/bin/python scripts/compare.py results/fix-compare
 ```
 
 Any environment field can be overridden with `--env key=value` (see `GridConfig`,
@@ -151,6 +152,7 @@ scripts/compare.py         results table across runs and seeds
 scripts/evaluate.py        re-score saved runs with the current metrics
 scripts/coordination.py    what the two holders of a piece do, step by step
 tests/                     environment mechanics and algorithm checks
+results/fix-compare/       evaluation files of every run in RESULTS.md, and four headline models
 ```
 
 ## Status

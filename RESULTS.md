@@ -46,7 +46,8 @@
   - An evaluation every ~100k steps on 50 greedy held-out episodes (`seed = 10000..10049`). Layouts vary across evaluation episodes: the big food sits on 39 different cells in the 50 episodes.
   - Seeds 0–4 for IPPO and MAPPO; seeds 0–2 for everything else, including variants.
   - Values are mean ± SD (population) over seeds' final evaluations.
-  - Artifacts are written to `runs/fix-compare/<group>/<world>-<algo>-s<seed>/`. That folder is git-ignored; §12 shows how to regenerate it.
+  - Artifacts are written to `runs/fix-compare/<group>/<world>-<algo>-s<seed>/`, which is git-ignored.
+  - The evaluation files of all 68 runs (`config.json`, `metrics.csv`, `eval.json`, `coordination.json`) are committed in `results/fix-compare/` with the same layout, along with four models: `honest/{grid,free}-{ippo,mappo}-s0/model.pt`. §12 shows how to regenerate the rest.
 
 ## 2. Main results (1M steps)
 
@@ -285,6 +286,7 @@ The timeout fix alone puts honest MAPPO above `e5295c0`'s hand-coded MAPPO at th
 
 ```bash
 .venv/bin/python -m pytest -q                                   # 33 tests
+.venv/bin/python scripts/compare.py results/fix-compare        # the tables above, from the committed files
 
 # main results: 1M steps; ~4–6 min per PPO run, ~16–26 min per value-based run (one core each)
 for w in grid free; do
