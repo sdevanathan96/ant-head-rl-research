@@ -78,3 +78,10 @@ class QMixer(nn.Module):
         w2 = torch.abs(self.hyper_w2(state)).view(b, self.embed, 1)
         b2 = self.hyper_b2(state).view(b, 1, 1)
         return (torch.bmm(hidden, w2) + b2).view(b)
+
+    @torch.no_grad()
+    def diagnostics(self, state: torch.Tensor) -> dict:
+        """Mean mixing-weight sizes and state bias on a batch of states (for logging)."""
+        return {"mix_w1": torch.abs(self.hyper_w1(state)).mean().item(),
+                "mix_w2": torch.abs(self.hyper_w2(state)).mean().item(),
+                "mix_b2": self.hyper_b2(state).mean().item()}

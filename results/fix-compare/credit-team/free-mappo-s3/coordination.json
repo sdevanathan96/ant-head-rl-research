@@ -1,0 +1,24 @@
+{
+ "co_holding_steps_per_ep": 12.08,
+ "same_obs": 1.0,
+ "agree": 0.478476821192053,
+ "split": 0.08443708609271523,
+ "wait": 0.3195364238410596,
+ "hold": 0.11754966887417219,
+ "release": 0.0,
+ "diag_steps": 0.0,
+ "nestward": 0.3470790378006873,
+ "diag_agree": NaN,
+ "straight_agree": NaN,
+ "larger_axis": NaN,
+ "solo_steps_per_ep": 5.8,
+ "solo_pull": 0.7241379310344828,
+ "solo_wait": 0.27586206896551724,
+ "solo_release": 0.0,
+ "x_share_by_ant": [
+  null,
+  null,
+  null,
+  null
+ ]
+}

@@ -1,0 +1,43 @@
+{
+ "world": "grid",
+ "algo": "mappo",
+ "seed": 3,
+ "steps": 1000000,
+ "env": {
+  "n_ants": 4,
+  "n_crumbs": 4,
+  "n_big": 1,
+  "pieces_per_big": 4,
+  "cut_work": 2,
+  "piece_weight": 2,
+  "crumb_value": 1.0,
+  "piece_value": 2.0,
+  "max_steps": 100,
+  "observe_teammates": true,
+  "shaping": 0.1,
+  "step_cost": 0.0,
+  "hold_on_stay": false,
+  "feel_tug": false,
+  "size": 10,
+  "view_radius": 2
+ },
+ "learner": {
+  "centralized_critic": true,
+  "share": true,
+  "hidden": 128,
+  "lr": 0.0005,
+  "gamma": 0.99,
+  "gae_lambda": 0.95,
+  "clip": 0.2,
+  "epochs": 4,
+  "minibatches": 4,
+  "entropy_coef": 0.01,
+  "value_coef": 0.5,
+  "grad_clip": 0.5,
+  "rollout_steps": 128,
+  "num_envs": 8,
+  "agent_id": true,
+  "credit": "team",
+  "critic_per_ant": false
+ }
+}

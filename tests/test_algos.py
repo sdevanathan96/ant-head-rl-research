@@ -51,6 +51,41 @@ def test_value_learners_update_and_round_trip():
         assert np.array_equal(clone.act(obs), learner.act(obs))
 
 
+def test_value_update_reports_diagnostics():
+    """Every update reports the TD prediction and target, the gradient norm and the action gap;
+    QMIX also reports its mixing weights, which match a direct computation on the same states."""
+    env = make_env("grid", seed=0, n_ants=2, size=7)
+    common = {"pred_mean", "target_mean", "grad_norm", "q_gap", "loss", "q_mean"}
+    mixing = {"mix_w1", "mix_w2", "mix_b2"}
+    for mixer in ("none", "vdn", "qmix"):
+        cfg = ValueConfig(mixer=mixer, reward="team", hidden=16, batch_size=16, learning_starts=16)
+        learner = ValueLearner(env.n_agents, env.obs_dim, env.state_dim, env.n_actions, cfg)
+        _fill(learner, env, 100)
+        stats = learner.update()
+        assert set(stats) == common | (mixing if mixer == "qmix" else set())
+        assert all(np.isfinite(v) for v in stats.values()) and stats["grad_norm"] >= 0
+    state = torch.randn(32, env.state_dim)
+    m = learner.mixer
+    d = m.diagnostics(state)
+    with torch.no_grad():
+        assert np.isclose(d["mix_w1"], m.hyper_w1(state).abs().mean().item())
+        assert np.isclose(d["mix_w2"], m.hyper_w2(state).abs().mean().item())
+        assert np.isclose(d["mix_b2"], m.hyper_b2(state).mean().item())
+
+
+def test_qmix_training_logs_window_averaged_diagnostics(tmp_path):
+    import csv
+
+    from antrl.train import main
+    main(["--world", "grid", "--algo", "qmix", "--steps", "128", "--eval-every", "64", "--eval-episodes", "1",
+          "--env", "n_ants=2", "size=7", "max_steps=20",
+          "--set", "learning_starts=32", "batch_size=16", "hidden=16", "--out", str(tmp_path)])
+    rows = list(csv.DictReader((tmp_path / "grid-qmix-s0" / "metrics.csv").open()))
+    assert len(rows) == 2
+    for key in ("loss", "pred_mean", "target_mean", "grad_norm", "q_gap", "mix_w1", "mix_w2", "mix_b2", "epsilon"):
+        assert np.isfinite(float(rows[-1][key])), key
+
+
 def test_iql_own_reward_target_uses_each_ants_reward():
     """A transition where only ant 0 is rewarded: IQL-own pushes Q_0 up, not Q_1."""
     env = make_env("grid", seed=0, n_ants=2, size=7)

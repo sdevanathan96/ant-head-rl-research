@@ -1,0 +1,29 @@
+{
+ "team_value": 8.44,
+ "crumbs": 2.64,
+ "pieces": 2.9,
+ "pieces_paired": 1.32,
+ "cut_work": 7.64,
+ "grabs": 7.98,
+ "stalled_pulls": 2.64,
+ "moving_pulls": 58.42,
+ "carry_team": 5.072646326547686,
+ "carry_solo": 8.595,
+ "gini": 0.2685696248196248,
+ "team_value_std": 3.1251239975399376,
+ "per_ant_share": [
+  0.274,
+  0.254,
+  0.24,
+  0.232
+ ],
+ "per_ant_cut": [
+  2.06,
+  1.9,
+  2.06,
+  1.62
+ ],
+ "max_team_value": 12.0,
+ "logged_team_value": 8.7,
+ "step": 1000000
+}

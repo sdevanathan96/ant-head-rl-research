@@ -13,6 +13,10 @@ Presets (stage 1 = each ant alone, stage 2 = loosened policies):
     mappo     PPO with a centralised critic V(s), team reward
 
 Every run writes runs/<world>-<algo>-s<seed>/{config.json, metrics.csv, model.pt}.
+
+With --coord, every evaluation also records what the holders of a piece do (antrl/coordination.py),
+once greedily (columns g_*) and once with each ant sampling its own action as in training (s_*).
+This does not change the training run itself.
 """
 from __future__ import annotations
 
@@ -28,6 +32,7 @@ import torch
 
 from .algos.ppo import PPOConfig, PPOLearner
 from .algos.value_based import ValueConfig, ValueLearner
+from .coordination import LOG_KEYS as COORD_KEYS, analyse_policy, preserved_rng
 from .envs import make_env
 
 PRESETS = {
@@ -73,21 +78,28 @@ def build(world: str, algo: str, seed: int, env_overrides: dict, algo_overrides:
     return kind, env, env_kw, learner
 
 
-def evaluate(world: str, env_kw: dict, learner, episodes: int = 20, seed: int = 10_000) -> dict:
-    """Greedy rollouts on held-out seeds → mean episode metrics."""
+def evaluate(world: str, env_kw: dict, learner, episodes: int = 20, seed: int = 10_000,
+             sample: bool = False) -> dict:
+    """Rollouts on held-out seeds → mean episode metrics.
+
+    Greedy by default. sample=True lets each ant sample as in training (PPO from π, value-based
+    ε-greedy at the final ε); the random state is restored afterwards.
+    """
     env = make_env(world, seed=seed, **env_kw)
+    eps = learner.cfg.eps_end if sample and not isinstance(learner, PPOLearner) else 0.0
     summaries = []
-    for k in range(episodes):
-        obs, state, _ = env.reset(seed=seed + k)
-        done = False
-        while not done:
-            if isinstance(learner, PPOLearner):
-                a, _, _ = learner.act(obs[None], state[None], greedy=True)
-                a = a[0]
-            else:
-                a = learner.act(obs, eps=0.0)
-            obs, state, _, _, done, info = env.step(a)
-        summaries.append(info["episode"])
+    with preserved_rng(learner):
+        for k in range(episodes):
+            obs, state, _ = env.reset(seed=seed + k)
+            done = False
+            while not done:
+                if isinstance(learner, PPOLearner):
+                    a, _, _ = learner.act(obs[None], state[None], greedy=not sample)
+                    a = a[0]
+                else:
+                    a = learner.act(obs, eps=eps)
+                obs, state, _, _, done, info = env.step(a)
+            summaries.append(info["episode"])
     out = {key: float(np.mean([s[key] for s in summaries]))
            for key in ("team_value", "crumbs", "pieces", "pieces_paired", "cut_work", "grabs",
                        "stalled_pulls", "moving_pulls", "carry_team", "carry_solo", "gini")}
@@ -99,8 +111,9 @@ def evaluate(world: str, env_kw: dict, learner, episodes: int = 20, seed: int = 
 
 
 def train_value(env, learner: ValueLearner, steps: int, on_eval, eval_every: int):
+    """Logged update statistics are means over the updates since the previous evaluation."""
     obs, state, _ = env.reset()
-    last = {}
+    window: dict[str, list[float]] = {}
     for step in range(1, steps + 1):
         eps = learner.epsilon(step)
         actions = learner.act(obs, eps)
@@ -112,9 +125,11 @@ def train_value(env, learner: ValueLearner, steps: int, on_eval, eval_every: int
         if done:
             obs, state, _ = env.reset()
         if learner.ready(step):
-            last = learner.update()
+            for k, v in learner.update().items():
+                window.setdefault(k, []).append(v)
         if step % eval_every == 0 or step == steps:
-            on_eval(step, {**last, "epsilon": eps})
+            on_eval(step, {**{k: float(np.mean(v)) for k, v in window.items()}, "epsilon": eps})
+            window = {}
 
 
 def train_ppo(world, env_kw, learner: PPOLearner, steps: int, seed: int, on_eval, eval_every: int):
@@ -164,6 +179,8 @@ def main(argv=None):
     ap.add_argument("--out", default="runs")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--threads", type=int, default=1, help="torch CPU threads (1 lets runs share cores)")
+    ap.add_argument("--coord", action="store_true",
+                    help="at each evaluation, also log holder coordination, greedy (g_*) and sampled (s_*)")
     args = ap.parse_args(argv)
     torch.set_num_threads(args.threads)
 
@@ -188,7 +205,13 @@ def main(argv=None):
         row = {"step": step, "minutes": round((time.time() - t0) / 60, 2),
                **{k: v for k, v in ev.items() if k not in ("per_ant_share", "per_ant_cut")},
                "per_ant_share": " ".join(map(str, ev["per_ant_share"])),
-               "per_ant_cut": " ".join(map(str, ev["per_ant_cut"])), **train_stats}
+               "per_ant_cut": " ".join(map(str, ev["per_ant_cut"]))}
+        if args.coord:
+            for tag, sample in (("g", False), ("s", True)):
+                co = analyse_policy(args.world, env_kw, learner, args.eval_episodes,
+                                    sample=sample, eps=train_stats.get("epsilon"))
+                row.update({f"{tag}_{k}": round(co[k], 4) for k in COORD_KEYS})
+        row.update(train_stats)
         with csv_path.open("a", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(row))
             if not header_written:
@@ -198,7 +221,8 @@ def main(argv=None):
         torch.save(learner.state_dict(), run / "model.pt")
         print(f"[{args.world}/{args.algo}] step {step:>8,}  team food {ev['team_value']:5.2f}/{ev['max_team_value']:.0f}"
               f"  crumbs {ev['crumbs']:.2f}  pieces {ev['pieces']:.2f}  gini {ev['gini']:.2f}"
-              f"  shares {ev['per_ant_share']}", flush=True)
+              f"  shares {ev['per_ant_share']}"
+              + (f"  agree g/s {row['g_agree']:.2f}/{row['s_agree']:.2f}" if args.coord else ""), flush=True)
 
     if kind == "value":
         train_value(env, learner, args.steps, on_eval, args.eval_every)

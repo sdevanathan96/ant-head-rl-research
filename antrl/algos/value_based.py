@@ -138,14 +138,19 @@ class ValueLearner:
         loss = F.smooth_l1_loss(pred, target)
         self.opt.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.params, c.grad_clip)
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.params, c.grad_clip)
         self.opt.step()
         self.updates += 1
         if self.updates % c.target_update == 0:
             self.q_target.load_state_dict(self.q.state_dict())
             if self.mixer is not None:
                 self.mixer_target.load_state_dict(self.mixer.state_dict())
-        return {"loss": loss.item(), "q_mean": q_taken.mean().item()}
+        stats = {"loss": loss.item(), "q_mean": q_taken.mean().item(), "pred_mean": pred.mean().item(),
+                 "target_mean": target.mean().item(), "grad_norm": float(grad_norm),
+                 "q_gap": (q_all.max(-1).values - q_all.min(-1).values).mean().item()}
+        if isinstance(self.mixer, QMixer):
+            stats.update(self.mixer.diagnostics(b["state"]))
+        return stats
 
     def state_dict(self) -> dict:
         return {"cfg": asdict(self.cfg), "q": self.q.state_dict(),
