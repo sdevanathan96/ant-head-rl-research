@@ -1,9 +1,12 @@
-"""Summarise finished runs into one table (last evaluation of each run, mean ± sd over seeds).
+"""Summarise finished runs into one table (mean ± sd over seeds).
 
-    python scripts/compare.py runs/
+    python scripts/compare.py runs/                  # greedy: the last training-time evaluation
+    python scripts/compare.py --sample runs/         # sampled: eval_sampled.json (the headline scores)
 
-Runs logged before ``pieces_paired`` existed take it from ``eval.json`` (written by
-scripts/evaluate.py); without either, the cell shows "–".
+Greedy rows come from the last row of metrics.csv. Runs logged before ``pieces_paired``
+existed take it from ``eval.json`` (written by scripts/evaluate.py); without either, the
+cell shows "–". With --sample, each run is read from ``eval_sampled.json`` (written by
+scripts/evaluate.py --sample), and runs without one are left out.
 """
 import csv
 import json
@@ -14,20 +17,26 @@ from pathlib import Path
 import numpy as np
 
 
-def main(root="runs"):
+def main(root="runs", sample=False):
     groups = defaultdict(list)
     for f in sorted(Path(root).glob("**/metrics.csv")):
-        rows = list(csv.DictReader(f.open()))
-        if not rows:
-            continue
         world, algo, _seed = f.parent.name.rsplit("-", 2)
-        last = dict(rows[-1])
-        extra = f.parent / "eval.json"
-        if "pieces_paired" not in last and extra.exists():
-            last["pieces_paired"] = json.loads(extra.read_text())["pieces_paired"]
+        if sample:
+            sampled = f.parent / "eval_sampled.json"
+            if not sampled.exists():
+                continue
+            last = json.loads(sampled.read_text())
+        else:
+            rows = list(csv.DictReader(f.open()))
+            if not rows:
+                continue
+            last = dict(rows[-1])
+            extra = f.parent / "eval.json"
+            if "pieces_paired" not in last and extra.exists():
+                last["pieces_paired"] = json.loads(extra.read_text())["pieces_paired"]
         groups[(str(f.parent.parent.relative_to(root)), world, algo)].append(last)
     if not groups:
-        sys.exit(f"no metrics.csv under {root}")
+        sys.exit(f"no {'eval_sampled.json' if sample else 'metrics.csv'} under {root}")
     cols = ("team_value", "crumbs", "pieces", "pieces_paired", "cut_work", "moving_pulls", "stalled_pulls", "gini")
     print(f"{'group':<16}{'world':<6}{'algo':<10}{'n':>3}  " + "".join(f"{c:>17}" for c in cols) + "   steps")
     for (group, world, algo), rows in sorted(groups.items()):
@@ -42,4 +51,5 @@ def main(root="runs"):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    args = sys.argv[1:]
+    main(*[a for a in args if a != "--sample"], sample="--sample" in args)

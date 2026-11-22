@@ -1,26 +1,26 @@
 # Results: cooperative transport across six MARL learners
 
-**Summary.**
+**Summary.** Scores are sampled: each ant samples its action as it did in training (§1, §6.2). Greedy scores are given alongside.
 
 - **Grid world, 1M steps.**
-  - IPPO and MAPPO learn the full task from honest local observations: **11.75 / 12** and **11.42 / 12** food per episode over 5 seeds, with 3.90 and 3.77 of 4 pieces carried home by pairs of ants.
-  - With their default settings, only VDN among the value-based learners carries pieces (5.51 / 12, 1.64 pieces), and QMIX collapses to about 0.
-  - Retuned (§8), VDN and QMIX reach **8.23** and **8.44 / 12** with about 2.7 pieces. They still trail PPO, and their holders agree on 65–71% of co-holding steps against 93–94% for PPO.
-  - IQL and IQL-team forage mostly crumbs (3.2–4.5 / 12). Tuned IQL moves an occasional piece (0.58 per episode) without seeing its partner.
+  - IPPO and MAPPO learn the full task from honest local observations: **11.85 / 12** and **11.61 / 12** food per episode over 5 seeds, with 3.94 and 3.82 of 4 pieces carried home by pairs of ants. MAPPO with one value output per ant scores **11.92** (§7).
+  - With their default settings, only VDN among the value-based learners carries pieces (6.05 / 12, 1.81 pieces), and QMIX collapses to about 0.
+  - Retuned (§8), VDN and QMIX reach **8.55** and **8.44 / 12** with 2.6–2.75 pieces. They still trail PPO, and their holders agree on 63–69% of co-holding steps against 93–98% for PPO.
+  - IQL and IQL-team forage mostly crumbs (2.8–4.8 / 12). Tuned IQL moves an occasional piece (0.64 per episode) without seeing its partner.
 - **Why QMIX collapsed** (§8.1). With the target network synced every 500 updates, the team value estimate overshoots early. QMIX's state-conditioned mixer absorbs the overshoot, its weights keep growing, and the estimate diverges. Syncing every 2,000 updates fixes it in both worlds.
 - **Free world (continuous space, noisy headings).**
-  - IPPO and MAPPO reach 8.49 and 7.91 / 12 at 1M steps. Trained to 10M, MAPPO keeps improving until about 8M and levels off at about **11.4**; IPPO levels off earlier, at about **11.0**.
-  - Here a lone ant can drag a piece at half speed, so delivered pieces don't prove cooperation. IQL, which cannot see its teammates, scores 7.82 with default settings and 9.17 tuned. Tuned VDN scores 9.63, above greedy PPO at 1M.
-  - A new holder count shows that IPPO carries 73% of its delivered pieces in pairs, against 46–66% for VDN and IQL, tuned or not. With longer training, 80–83% are paired. Tuned IQL's absolute paired count (2.02) matches IPPO's (1.94), so at 1M steps only the grid separates cooperative learners from independent ones.
+  - IPPO and MAPPO reach 9.59 and 9.43 / 12 at 1M steps, and **11.49** and **11.41** at 10M, close to their grid scores (§5).
+  - Here a lone ant can drag a piece at half speed, so delivered pieces don't prove cooperation. With default settings PPO is clearly ahead of IQL, which cannot see its teammates (7.59). Tuned, IQL and VDN score 9.45 and 9.48, level with PPO.
+  - A holder count shows that IPPO carries 74% of its delivered pieces in pairs, against 41–69% for VDN and IQL, tuned or not. With longer training, 81–85% are paired. Tuned IQL's absolute paired count (2.18) is close to IPPO's (2.29), so at 1M steps only the grid separates cooperative learners from independent ones.
 - **How pairs coordinate on the grid.**
   - The two holders of a piece always see identical observations; only the ant id differs.
-  - The shared policy learns to ignore the id while holding and to pull toward the nest, so the holders agree on 93–94% of steps.
+  - The shared policy learns to ignore the id while holding and to pull toward the nest, so the holders agree on 93–98% of steps.
   - Most stalled pulls are a lone holder pulling while it waits for a partner, not a disagreement.
-  - Agreement rises with transport during training. Once transport is learned, sampling actions as in training costs no agreement on the grid; in the free world it does (about 0.7 against 0.8).
-- **Greedy evaluation understates PPO where training hasn't settled.** With each ant sampling its action, IPPO and MAPPO score 9.59 and 9.43 in the free world at 1M steps (8.49 and 7.91 greedy), clearly ahead of IQL (7.59). Greedy play can deadlock: two holders that split see nearly the same thing next step and split again.
+  - Agreement rises with transport during training. Once transport is learned, sampling actions costs no agreement on the grid; in the free world it does (about 0.7 against 0.8).
+- **Why the headline is sampled** (§6.2). Sampling scores each learner the way it acted in training. PPO's policy is random by design, and greedy play can deadlock: two holders that split see nearly the same thing next step and split again. Greedy scores understate PPO by 1.1–1.5 in the free world at 1M steps. The value-based learners, which act greedily 95% of the time anyway, change by at most 0.54.
 - **MAPPO credit.**
-  - One value output per ant gives the best and most consistent MAPPO on the grid (11.72 ± 0.19 over 5 seeds) and learns fastest, but trails the default in the free world (6.72 vs 7.91).
-  - Training on the team reward alone is slower on the grid and much worse in the free world (3.26 vs 7.91).
+  - One value output per ant gives the best and most consistent MAPPO on the grid (11.92 ± 0.04 over 5 seeds) and learns fastest, but trails the default in the free world (8.20 vs 9.43).
+  - Training on the team reward alone is slower on the grid and much worse in the free world (4.76 vs 9.43).
 - **Earlier results stay withdrawn.** The results that relied on a target oracle (`bfe4eb3`) or on hand-coded holder synchronisation (`e5295c0`) are withdrawn (§11).
 
 ## 1. Setup
@@ -43,67 +43,68 @@
   - `iql_team`: the same, but on the team reward.
   - `vdn` and `qmix`: a shared Q-network with ant id, the team reward, and a sum or monotonic mixer.
   - `ippo` and `mappo`: a shared policy with ant id. IPPO uses a per-ant critic V(o_i) and MAPPO a centralised critic V(s). Both blend each ant's own reward with the team's in the advantage (`0.5·own + 0.5·team/n`).
-  - During training each ant picks its action independently (ε-greedy or sampling). Evaluation is greedy and decentralised.
+  - During training each ant picks its action independently (ε-greedy or sampling). Evaluation is decentralised too.
 - **Protocol.**
   - About 1M environment steps per run (1,000,448 for PPO, 1,000,000 for the value-based learners).
-  - An evaluation every ~100k steps on 50 greedy held-out episodes (`seed = 10000..10049`). Layouts vary across evaluation episodes: the big food sits on 39 different cells in the 50 episodes.
+  - An evaluation every ~100k steps on 50 held-out episodes (`seed = 10000..10049`), acting greedily: each ant takes its highest-scoring action. These give the learning curves (§3, §5) and the screen (§8.2). Layouts vary across evaluation episodes: the big food sits on 39 different cells in the 50 episodes.
+  - **Headline scores are sampled.** Each final model is re-scored on the same 50 episodes with every ant sampling its own action as in training: PPO samples from π, and the value-based learners act ε-greedily at their final ε = 0.05 (`scripts/evaluate.py --sample`). Greedy scores are reported alongside. Until Nov 22 the headline was greedy; §6.2 explains the change.
   - Seeds 0–4 for IPPO, MAPPO and the MAPPO credit variants; seeds 0–2 for everything else, including the optional-switch runs.
   - The value-based learners use their default settings unless a row says **tuned**: `--set lr=2.5e-4` for IQL and IQL-team, `--set lr=2.5e-4 target_update=2000` for VDN and QMIX (§8). The defaults in `ValueConfig` are unchanged.
-  - Values are mean ± SD (population) over seeds' final evaluations.
+  - Values are mean ± SD (population) over seeds' final models.
   - Artifacts are written to `runs/fix-compare/<group>/<world>-<algo>-s<seed>/`, which is git-ignored.
   - The evaluation files of all 142 runs (`config.json`, `metrics.csv`, and where computed `eval.json`, `eval_sampled.json`, `coordination.json`, `coordination_sampled.json`) are committed in `results/fix-compare/` with the same layout, along with ten models: `honest/{grid,free}-{ippo,mappo}-s0/model.pt`, `long10m/free-{ippo,mappo}-s0/model.pt` and `tuned/{grid,free}-{vdn,qmix}-s0/model.pt`. §13 shows how to regenerate the rest.
 
 ## 2. Main results (1M steps)
 
-Pull efficiency = moving pulls / (moving + stalled pulls). On the grid a single puller can never move a piece, so every pull by a lone holder counts as stalled (§6).
+All columns are sampled (§1) except the last, which gives team food with greedy actions. Pull efficiency = moving pulls / (moving + stalled pulls). On the grid a single puller can never move a piece, so every pull by a lone holder counts as stalled (§6).
 
 ### 2.1 Grid world
 
-| Learner | Seeds | Team food (/12) | Per-seed team food | Crumbs (/4) | Pieces (/4) | Cut work (/8) | Pull eff. | Gini |
-|---|---:|---:|---|---:|---:|---:|---:|---:|
-| `ippo` | 5 | **11.75 ± 0.08** | 11.88, 11.64, 11.78, 11.68, 11.78 | 3.96 | **3.90 ± 0.04** | 7.92 | 77% | 0.12 |
-| `mappo` | 5 | **11.42 ± 0.39** | 11.70, 11.60, 11.14, 10.82, 11.86 | 3.88 | **3.77 ± 0.14** | 7.74 | 71% | 0.15 |
-| `qmix`, tuned | 3 | 8.44 ± 1.35 | 9.52, 6.54, 9.26 | 3.12 | 2.66 ± 0.58 | 6.92 | 50% | 0.22 |
-| `vdn`, tuned | 3 | 8.23 ± 0.14 | 8.04, 8.34, 8.32 | 2.93 | 2.65 ± 0.07 | 6.53 | 69% | 0.19 |
-| `vdn` | 3 | 5.51 ± 1.50 | 5.44, 7.38, 3.72 | 2.23 | 1.64 ± 0.52 | 4.99 | 61% | 0.28 |
-| `iql`, tuned | 3 | 4.52 ± 0.29 | 4.16, 4.88, 4.52 | 3.36 | 0.58 ± 0.20 | 5.29 | 9% | 0.30 |
-| `iql` | 3 | 3.29 ± 0.17 | 3.08, 3.30, 3.50 | 3.29 | 0 | 3.46 | no piece moved | 0.42 |
-| `iql_team`, tuned | 3 | 3.16 ± 0.06 | 3.20, 3.20, 3.08 | 3.16 | 0 | 3.65 | 3% | 0.39 |
-| `iql_team` | 3 | 2.73 ± 0.22 | 2.74, 3.00, 2.46 | 2.73 | 0 | 0.97 | no piece moved | 0.47 |
-| `qmix` | 3 | 0.08 ± 0.10 | 0.22, 0.02, 0.00 | 0.08 | 0 | 0.47 | 7% | 0.06 |
-| `ippo` + all optional switches | 3 | 11.31 ± 0.32 | 10.86, 11.44, 11.62 | 3.84 | 3.73 ± 0.11 | 7.70 | 80% | 0.14 |
-| `mappo` + all optional switches | 3 | 11.10 ± 0.57 | 10.60, 10.80, 11.90 | 3.77 | 3.67 ± 0.21 | 7.56 | 80% | 0.16 |
+| Learner | Seeds | Team food (/12) | Per-seed team food | Crumbs (/4) | Pieces (/4) | Cut work (/8) | Pull eff. | Gini | Greedy team food |
+|---|---:|---:|---|---:|---:|---:|---:|---:|---:|
+| `ippo` | 5 | **11.85 ± 0.13** | 11.92, 11.88, 11.94, 11.60, 11.90 | 3.98 | **3.94 ± 0.06** | 7.97 | 73% | 0.11 | 11.75 ± 0.08 |
+| `mappo` | 5 | **11.61 ± 0.13** | 11.42, 11.50, 11.76, 11.64, 11.74 | 3.98 | **3.82 ± 0.06** | 7.92 | 69% | 0.14 | 11.42 ± 0.39 |
+| `vdn`, tuned | 3 | 8.55 ± 0.15 | 8.62, 8.34, 8.70 | 3.06 | 2.75 ± 0.13 | 6.88 | 62% | 0.19 | 8.23 ± 0.14 |
+| `qmix`, tuned | 3 | 8.44 ± 1.01 | 9.30, 7.02, 9.00 | 3.24 | 2.60 ± 0.44 | 6.81 | 47% | 0.21 | 8.44 ± 1.35 |
+| `vdn` | 3 | 6.05 ± 1.50 | 6.34, 7.72, 4.08 | 2.43 | 1.81 ± 0.54 | 5.45 | 57% | 0.28 | 5.51 ± 1.50 |
+| `iql`, tuned | 3 | 4.76 ± 0.43 | 4.26, 5.32, 4.70 | 3.48 | 0.64 ± 0.26 | 5.59 | 11% | 0.30 | 4.52 ± 0.29 |
+| `iql` | 3 | 3.45 ± 0.17 | 3.22, 3.62, 3.50 | 3.45 | 0 | 3.73 | no piece moved | 0.38 | 3.29 ± 0.17 |
+| `iql_team`, tuned | 3 | 3.21 ± 0.19 | 3.22, 3.44, 2.98 | 3.21 | 0 | 3.85 | 1% | 0.39 | 3.16 ± 0.06 |
+| `iql_team` | 3 | 2.83 ± 0.20 | 2.74, 3.10, 2.64 | 2.83 | 0 | 1.56 | no piece moved | 0.44 | 2.73 ± 0.22 |
+| `qmix` | 3 | 0.13 ± 0.19 | 0.40, 0.00, 0.00 | 0.13 | 0 | 0.55 | 4% | 0.06 | 0.08 ± 0.10 |
+| `ippo` + all optional switches | 3 | 11.83 ± 0.07 | 11.90, 11.86, 11.74 | 3.97 | 3.93 ± 0.02 | 7.97 | 73% | 0.13 | 11.31 ± 0.32 |
+| `mappo` + all optional switches | 3 | 11.79 ± 0.02 | 11.82, 11.78, 11.78 | 3.98 | 3.91 ± 0.01 | 7.89 | 77% | 0.13 | 11.10 ± 0.57 |
 
-- **IPPO and MAPPO.** Every piece on the grid is moved by two pullers, so every delivered piece counts as paired. In seeds 0–2, every ant ends up doing roughly a quarter of the work: per-ant delivery shares are 0.244–0.258 for IPPO and 0.228–0.266 for MAPPO.
-- **Optional switches.** "All optional switches" means `hold_on_stay=true feel_tug=true` and `agent_id=false` (§9.5). They do not help at this budget.
+- **IPPO and MAPPO.** Every piece on the grid is moved by two pullers, so every delivered piece counts as paired. In seeds 0–2, every ant ends up doing roughly a quarter of the work: per-ant delivery shares are 0.236–0.265 for IPPO and 0.236–0.271 for MAPPO.
+- **Optional switches.** "All optional switches" means `hold_on_stay=true feel_tug=true` and `agent_id=false` (§9.5). Sampled, they match the defaults (11.83 and 11.79 against 11.85 and 11.61). Greedy, they looked worse (11.31 and 11.10), because greedy play costs them more. They do not help at this budget.
 - **"Tuned"** rows use a smaller learning rate, plus a 4× slower target sync for VDN and QMIX (§8). Every value-based learner improves with them.
-- **VDN** carries pieces with its default settings, but its seeds vary widely (1.08–2.34 pieces) and scores swing between evaluations (§3). Tuned, it carries 2.65 pieces and its seeds agree within 0.3.
-- **IQL and IQL-team** forage crumbs. With default settings they never move a piece. IQL on its own reward beats IQL on the team reward. Tuned IQL moves 0.58 pieces per episode, although its ants can't see each other and its holders pull the same way on only 12% of co-holding steps (§6).
-- **QMIX** with default settings rises and then collapses. In grid seeds 0 and 1 it peaked at 3.86 (700k steps) and 3.40 (500k), then fell to about 0. Seed 2 never got above 0.16. The cause is the target-network schedule, not the task (§8.1). Tuned, QMIX has the best value-based grid score, but its seeds spread more (6.54–9.52) and it is still improving steeply at 1M steps (§3).
+- **VDN** carries pieces with its default settings, but its seeds vary widely (1.10–2.42 pieces) and scores swing between evaluations (§3). Tuned, it carries 2.75 pieces and its seeds agree within 0.4.
+- **IQL and IQL-team** forage crumbs. With default settings they never move a piece. IQL on its own reward beats IQL on the team reward. Tuned IQL moves 0.64 pieces per episode, although its ants can't see each other and its holders pull the same way on only 12–14% of co-holding steps (§6).
+- **QMIX** with default settings rises and then collapses. In the greedy evaluations during training, grid seeds 0 and 1 peaked at 3.86 (700k steps) and 3.40 (500k), then fell to about 0. Seed 2 never got above 0.16. The cause is the target-network schedule, not the task (§8.1). Tuned, QMIX scores about as well as tuned VDN (8.44 against 8.55), but its seeds spread more (7.02–9.30) and it is still improving steeply at 1M steps (§3).
 - **PPO is still ahead on the grid**, by about 3 food and 1.2 pieces per episode over tuned VDN and QMIX. PPO was not tuned.
 
 ### 2.2 Free world
 
-| Learner | Seeds | Team food (/12) | Per-seed team food | Crumbs (/4) | Pieces (/4) | **Paired pieces** | Cut work (/8) | Gini |
-|---|---:|---:|---|---:|---:|---:|---:|---:|
-| `ippo` | 5 | 8.49 ± 1.04 | 10.24, 7.94, 7.46, 9.10, 7.72 | 3.16 | 2.66 ± 0.47 | 1.94 ± 0.40 | 6.31 | 0.21 |
-| `mappo` | 5 | 7.91 ± 0.78 | 8.08, 7.22, 8.24, 6.92, 9.10 | 3.02 | 2.44 ± 0.41 | 1.58 ± 0.40 | 5.94 | 0.28 |
-| `vdn`, tuned | 3 | **9.63 ± 0.16** | 9.80, 9.42, 9.66 | 2.71 | **3.46 ± 0.02** | 1.59 ± 0.30 | 7.59 | 0.23 |
-| `iql`, tuned | 3 | 9.17 ± 0.59 | 9.98, 8.62, 8.90 | 3.09 | 3.04 ± 0.25 | **2.02 ± 0.36** | 6.60 | 0.20 |
-| `iql` | 3 | 7.82 ± 0.88 | 8.14, 6.62, 8.70 | 2.77 | 2.53 ± 0.40 | 1.55 ± 0.32 | 6.25 | 0.26 |
-| `vdn` | 3 | 6.84 ± 1.52 | 6.84, 8.70, 4.98 | 1.00 | 2.92 ± 0.39 | 1.37 ± 0.29 | 7.19 | 0.27 |
-| `iql_team`, tuned | 3 | 5.40 ± 0.73 | 4.42, 5.60, 6.18 | 1.80 | 1.80 ± 0.33 | 0.87 ± 0.15 | 5.83 | 0.42 |
-| `qmix`, tuned | 3 | 5.35 ± 2.49 | 3.52, 8.88, 3.66 | 3.22 | 1.07 ± 1.45 | 0.63 ± 0.87 | 3.34 | 0.27 |
-| `iql_team` | 3 | 3.47 ± 0.49 | 3.38, 4.12, 2.92 | 1.61 | 0.93 ± 0.25 | 0.30 ± 0.03 | 3.67 | 0.45 |
-| `qmix` | 3 | 0.37 ± 0.52 | 1.10, 0.00, 0.00 | 0.37 | 0 | 0 | 0.03 | 0.15 |
+| Learner | Seeds | Team food (/12) | Per-seed team food | Crumbs (/4) | Pieces (/4) | **Paired pieces** | Cut work (/8) | Gini | Greedy team food |
+|---|---:|---:|---|---:|---:|---:|---:|---:|---:|
+| `ippo` | 5 | **9.59 ± 0.45** | 10.22, 8.86, 9.46, 9.80, 9.62 | 3.42 | 3.09 ± 0.19 | **2.29 ± 0.21** | 7.33 | 0.20 | 8.49 ± 1.04 |
+| `vdn`, tuned | 3 | 9.48 ± 0.27 | 9.86, 9.36, 9.22 | 2.65 | **3.41 ± 0.01** | 1.39 ± 0.21 | 7.50 | 0.23 | 9.63 ± 0.16 |
+| `iql`, tuned | 3 | 9.45 ± 0.46 | 9.74, 8.80, 9.80 | 3.13 | 3.16 ± 0.18 | 2.18 ± 0.31 | 7.14 | 0.17 | 9.17 ± 0.59 |
+| `mappo` | 5 | 9.43 ± 0.46 | 9.98, 9.82, 9.28, 8.68, 9.38 | 3.43 | 3.00 ± 0.23 | 1.96 ± 0.17 | 7.40 | 0.23 | 7.91 ± 0.78 |
+| `iql` | 3 | 7.59 ± 0.60 | 7.98, 6.74, 8.06 | 2.74 | 2.43 ± 0.36 | 1.47 ± 0.21 | 6.15 | 0.25 | 7.82 ± 0.88 |
+| `vdn` | 3 | 6.87 ± 1.18 | 6.58, 8.44, 5.60 | 0.98 | 2.95 ± 0.21 | 1.41 ± 0.21 | 7.17 | 0.29 | 6.84 ± 1.52 |
+| `qmix`, tuned | 3 | 5.47 ± 2.51 | 3.56, 9.02, 3.82 | 3.19 | 1.14 ± 1.53 | 0.53 ± 0.74 | 3.27 | 0.25 | 5.35 ± 2.49 |
+| `iql_team`, tuned | 3 | 5.43 ± 0.57 | 4.62, 5.88, 5.78 | 1.85 | 1.79 ± 0.27 | 0.83 ± 0.19 | 5.96 | 0.40 | 5.40 ± 0.73 |
+| `iql_team` | 3 | 3.51 ± 0.53 | 3.26, 4.24, 3.02 | 1.80 | 0.85 ± 0.25 | 0.25 ± 0.04 | 3.59 | 0.47 | 3.47 ± 0.49 |
+| `qmix` | 3 | 0.41 ± 0.58 | 1.24, 0.00, 0.00 | 0.41 | 0 | 0 | 0.03 | 0.16 | 0.37 ± 0.52 |
 
 A paired piece is a delivered piece that 2 or more ants pulled together for at least half of its path (§4).
 
-- **Team food can't rank cooperation here.** IQL is blind to its teammates and moves almost no pieces on the grid, yet it matches MAPPO on team food with default settings and beats greedy PPO when tuned. With default settings the paired-piece column still put IPPO first. With each ant sampling its action instead of acting greedily, IPPO and MAPPO score 9.59 and 9.43 and pull clearly ahead of default IQL (§6.2).
-- **Tuned value-based learners close the gap, by solo effort as much as pairing.** Tuned VDN scores 9.63 and tuned IQL 9.17, level with PPO's sampled scores. But only 46% of VDN's and 66% of IQL's delivered pieces are paired, against 73% for IPPO. Tuned IQL's absolute paired count (2.02) matches IPPO's (1.94 greedy, 2.29 sampled). At this budget the free world doesn't separate cooperative from independent learners; the grid does (§2.1).
-- **VDN specialises with default settings.** It delivers the most pieces (2.92) but only 1.00 of 4 crumbs, and fewer than half of its pieces are paired. Tuned, it collects 2.71 crumbs as well.
-- **Tuned QMIX is stable but inconsistent here.** One seed carries pieces (8.88); the other two only forage crumbs (3.52 and 3.66).
-- **Pull efficiency is near 100% for every learner here,** since pulls stall only when they cancel. It is omitted for that reason.
+- **Team food can't rank cooperation here.** IQL is blind to its teammates and moves almost no pieces on the grid, yet tuned it scores 9.45, level with PPO. With default settings PPO is clearly ahead (9.43–9.59 against 7.59 for IQL), and the paired-piece column puts IPPO first. Greedy scores had default IQL level with MAPPO (§6.2).
+- **Tuned value-based learners close the gap, by solo effort as much as pairing.** Tuned VDN scores 9.48 and tuned IQL 9.45, level with IPPO and MAPPO. But only 41% of VDN's and 69% of IQL's delivered pieces are paired, against 74% for IPPO and 65% for MAPPO. Tuned IQL's absolute paired count (2.18) is close to IPPO's (2.29). At this budget the free world doesn't separate cooperative from independent learners; the grid does (§2.1).
+- **VDN specialises with default settings.** It delivers 2.95 pieces but only 0.98 of 4 crumbs, and fewer than half of its pieces are paired. Tuned, it collects 2.65 crumbs as well.
+- **Tuned QMIX is stable but inconsistent here.** One seed carries pieces (9.02); the other two only forage crumbs (3.56 and 3.82).
+- **Pull efficiency is 90–100% for every learner here,** since pulls stall only when they cancel. It is omitted for that reason.
 
 ## 3. Learning curves (mean over seeds 0–2)
 
@@ -125,7 +126,7 @@ A paired piece is a delivered piece that 2 or more ants pulled together for at l
 | `qmix` | free | 0.02 (0.0) | 0.00 (0.0) | 0.04 (0.0) | 0.00 (0.0) | 0.01 (0.0) | 0.01 (0.0) | 0.01 (0.0) | 0.01 (0.0) | 0.09 (0.0) | 0.37 (0.0) |
 | `qmix`, tuned | free | 0.97 (0.0) | 1.17 (0.0) | 1.70 (0.0) | 2.13 (0.1) | 3.10 (0.4) | 4.03 (0.8) | 4.91 (1.0) | 5.35 (1.1) | 5.37 (1.1) | 5.35 (1.1) |
 
-Each cell shows team food (/12), with pieces delivered (/4) in parentheses.
+Each cell shows team food (/12), with pieces delivered (/4) in parentheses. These are the greedy evaluations logged during training (§1); the final sampled scores are in §2.
 
 - **Order of learning.** Crumb foraging is learned first. On the grid, piece transport takes off between 100k and 300k steps for PPO; in the free world it starts later (300k–500k).
 - **Exploration timing.** The value-based learners finish annealing ε at 100k steps and start moving pieces after about 300k, tuned or not.
@@ -134,42 +135,42 @@ Each cell shows team food (/12), with pieces delivered (/4) in parentheses.
 
 ## 4. Which pieces are carried in pairs (free world)
 
-Every evaluation now records, for each step a piece moves, whether 1 ant or 2+ ants pulled it, and how far it moved. A delivered piece counts as **paired** when 2+ pullers moved it for at least half of its path (`pieces_paired`); `carry_team` and `carry_solo` are the path lengths. The 36 saved models from seeds 0–2 were re-scored with `scripts/evaluate.py`, and every one reproduced its logged team food exactly.
+Every evaluation now records, for each step a piece moves, whether 1 ant or 2+ ants pulled it, and how far it moved. A delivered piece counts as **paired** when 2+ pullers moved it for at least half of its path (`pieces_paired`); `carry_team` and `carry_solo` are the path lengths. The 36 saved models from seeds 0–2 were re-scored greedily with `scripts/evaluate.py`, and every one reproduced its logged team food exactly. The table uses the sampled re-scoring (`--sample`).
 
-| Learner | Pieces (/4) | Paired | Paired share | Path moved by 2+ pullers |
-|---|---:|---:|---:|---:|
-| `ippo` | 2.74 | 2.01 | **73%** | 72% |
-| `mappo` | 2.42 | 1.59 | 66% | 63% |
-| `iql` | 2.53 | 1.55 | 61% | 52% |
-| `vdn` | 2.92 | 1.37 | 47% | 42% |
-| `iql_team` | 0.93 | 0.30 | 32% | 28% |
+| Learner | Pieces (/4) | Paired | Paired share | Path moved by 2+ pullers | Paired share, greedy |
+|---|---:|---:|---:|---:|---:|
+| `ippo` | 3.12 | 2.33 | **75%** | 68% | 73% |
+| `mappo` | 3.13 | 2.01 | 64% | 63% | 66% |
+| `iql` | 2.43 | 1.47 | 60% | 50% | 61% |
+| `vdn` | 2.95 | 1.41 | 48% | 41% | 47% |
+| `iql_team` | 0.85 | 0.25 | 29% | 28% | 32% |
 
-Seeds 0–2, 50 held-out episodes each.
+Seeds 0–2, default settings, 50 held-out episodes each. The tuned learners are in §2.2.
 
-- **IPPO and MAPPO cooperate more** than the value-based learners, but none of them carries only in pairs.
+- **IPPO pairs the largest share**, MAPPO only a little more than IQL, and none of them carries only in pairs.
 - **IQL still pairs more than half of its pieces.** Its ants share no network and cannot see one another. Two holders on the same piece nonetheless receive identical observations and both tend to pull toward the nest (§6), so some pairing happens without any coordination.
 - **On the grid,** a piece cannot move with a single puller, so every delivered piece is paired by construction.
 
 ## 5. Longer free-world training (10M steps)
 
-| Learner | 1M | 2M | 3M | 4M | 5M | 6M | 7M | 8M | 9M | 10M | Per-seed at 10M | Paired at 10M | Sampled at 10M |
-|---|---|---|---|---|---|---|---|---|---|---|---|---:|---:|
-| `ippo` | 8.55 (2.7) | 9.03 (2.9) | 10.69 (3.6) | 10.35 (3.4) | 10.92 (3.6) | 10.74 (3.5) | 11.04 (3.6) | 10.67 (3.5) | 10.77 (3.5) | **10.91 ± 0.52 (3.6)** | 11.52, 10.96, 10.24 | 2.97 (83%) | 11.49 ± 0.06 |
-| `mappo` | 7.85 (2.4) | 9.57 (3.1) | 10.16 (3.3) | 10.49 (3.5) | 10.75 (3.6) | 11.07 (3.7) | 11.22 (3.7) | 11.37 (3.8) | 11.46 (3.8) | **11.31 ± 0.27 (3.8)** | 11.58, 10.94, 11.42 | 3.02 (80%) | 11.41 ± 0.05 |
+| Learner | 1M | 2M | 3M | 4M | 5M | 6M | 7M | 8M | 9M | 10M | **Sampled at 10M** | Per-seed, sampled | Paired, sampled |
+|---|---|---|---|---|---|---|---|---|---|---|---:|---|---:|
+| `ippo` | 8.55 (2.7) | 9.03 (2.9) | 10.69 (3.6) | 10.35 (3.4) | 10.92 (3.6) | 10.74 (3.5) | 11.04 (3.6) | 10.67 (3.5) | 10.77 (3.5) | 10.91 ± 0.52 (3.6) | **11.49 ± 0.06 (3.8)** | 11.54, 11.52, 11.40 | 3.22 (85%) |
+| `mappo` | 7.85 (2.4) | 9.57 (3.1) | 10.16 (3.3) | 10.49 (3.5) | 10.75 (3.6) | 11.07 (3.7) | 11.22 (3.7) | 11.37 (3.8) | 11.46 (3.8) | 11.31 ± 0.27 (3.8) | **11.41 ± 0.05 (3.8)** | 11.34, 11.44, 11.44 | 3.10 (81%) |
 
-Seeds 0–2, team food (/12) with pieces delivered (/4) in parentheses. "Sampled" is team food with each ant sampling its action (§6.2). The runs are deterministic: over their first 3M steps they match the earlier 3M runs (`long/`) exactly, and at 1M the runs of §2.2.
+Seeds 0–2, team food (/12) with pieces delivered (/4) in parentheses. The 1M–10M columns are the greedy evaluations logged during training; the last three columns re-score the final models with sampled actions (§1). The runs are deterministic: over their first 3M steps they match the earlier 3M runs (`long/`) exactly, and at 1M the runs of §2.2.
 
-A single evaluation moves by a few tenths, so the plateaus are clearer as the mean of the evaluations after 8M steps: IPPO 10.98 (seeds 11.51, 11.01, 10.42), MAPPO 11.45 (seeds 11.48, 11.39, 11.49).
+A single greedy evaluation moves by a few tenths, so the plateaus are clearer as the mean of the evaluations after 8M steps: IPPO 10.98 (seeds 11.51, 11.01, 10.42), MAPPO 11.45 (seeds 11.48, 11.39, 11.49).
 
-- **MAPPO keeps improving until about 8M steps**, then levels off at about 11.4 of 12, with its three seeds within 0.1 of each other. The earlier reading that MAPPO was flat from 2.5M steps was wrong: it was a pause.
-- **IPPO levels off earlier, at about 11.** It gains little after 5M steps (10.92 at 5M, 10.91 at 10M), and its seeds stay apart. MAPPO overtakes it from about 6M steps.
-- **Sampled, the two finish level** (11.49 and 11.41). Most of IPPO's greedy gap at 10M comes from seed 2, which scores 10.24 greedy and 11.40 sampled.
-- **Pairing grows with training.** At 10M, 80–83% of delivered pieces are paired, up from 66–73% at 1M.
-- **The free world is slower to learn, not harder in the end.** MAPPO at 10M steps (11.31 greedy, 11.41 sampled) is close to its grid score at 1M (11.42 and 11.61).
+- **Sampled, the two finish level** (11.49 and 11.41), with their seeds within 0.15 of each other.
+- **Greedy, MAPPO keeps improving until about 8M steps**, then levels off at about 11.4 of 12. The earlier reading that MAPPO was flat from 2.5M steps was wrong: it was a pause.
+- **Greedy, IPPO levels off earlier, at about 11,** and its seeds stay apart (11.52, 10.96, 10.24 at 10M). Most of that gap is greedy play: seed 2 scores 10.24 greedy and 11.40 sampled.
+- **Pairing grows with training.** At 10M, 81–85% of delivered pieces are paired, up from 65–74% at 1M.
+- **The free world is slower to learn, not harder in the end.** At 10M steps IPPO and MAPPO (11.49 and 11.41) are close to their grid scores at 1M (11.85 and 11.61).
 
 ## 6. How the two holders coordinate
 
-`scripts/coordination.py` replays each saved policy greedily on the 50 evaluation episodes. It records what both holders of a piece choose on each step, and what a lone holder does while it waits. All rows are means over seeds, with ranges across seeds in brackets.
+`scripts/coordination.py` replays each saved policy greedily on the 50 evaluation episodes. It records what both holders of a piece choose on each step, and what a lone holder does while it waits. Greedy replay shows each policy's preferred action; §6.1 gives agreement with sampled actions, which the headline scores use. All rows are means over seeds, with ranges across seeds in brackets.
 
 | Learner | World | Co-holding steps / ep | Same observation | Both pull the same way | Pulls toward the nest | Agree when the nest is diagonal | Lone-holder steps / ep | Lone holder pulls |
 |---|---|---:|---:|---|---|---|---:|---|
@@ -192,7 +193,7 @@ What this shows:
 2. **IPPO and MAPPO learn to ignore the id while holding and to pull toward the nest.** They then agree on 93–94% of grid steps.
    - No simple fixed rule explains the axis choice. "Pull along the larger component of the home vector" matches only 51–83% of diagonal pulls.
    - The x-vs-y choice is similar across ant ids in most runs.
-   - The exception is the weakest grid run, MAPPO seed 3 (10.82 / 12). Its x-share by ant id is 0.76, 0.65, 0.42 and 0.89: the id picks the axis, the holders agree on only 65% of diagonal steps, and the piece stalls more. This turns out to be a property of greedy play, not of the policy (§6.2).
+   - The exception is the weakest greedy grid run, MAPPO seed 3 (10.82 / 12 greedy, 11.64 sampled). Its x-share by ant id is 0.76, 0.65, 0.42 and 0.89: the id picks the axis, the holders agree on only 65% of diagonal steps, and the piece stalls more. This turns out to be a property of greedy play, not of the policy (§6.2).
 3. **Most stalled pulls on the grid are waiting, not disagreement.** A holder whose partner has not arrived yet usually pulls anyway (73–100% of such steps), and on the grid that always stalls. For IPPO, about 10 of the ~11 stalled pulls per episode come from lone holders and about 1 from split pulls. The pull-efficiency column in §2.1 therefore understates how well co-holders agree.
 4. **Separate networks or weaker policies agree less.**
    - VDN holders agree on 69% of grid steps and pull toward the nest only 57–62% of the time. Its pieces wander: holders spend 46 steps per episode co-holding, against 20 for PPO.
@@ -235,6 +236,7 @@ Final models, all seeds (`scripts/coordination.py --sample`; value-based learner
 | `iql` | free | 3 | 0.31 | 0.30 |
 | `vdn`, tuned | grid | 3 | 0.71 | 0.69 |
 | `qmix`, tuned | grid | 3 | 0.65 | 0.63 |
+| `iql`, tuned | grid | 3 | 0.12 | 0.14 |
 | `vdn`, tuned | free | 3 | 0.51 | 0.54 |
 | `iql`, tuned | free | 3 | 0.28 | 0.30 |
 | `ippo`, 3M steps | free | 3 | 0.78 | 0.73 |
@@ -242,9 +244,9 @@ Final models, all seeds (`scripts/coordination.py --sample`; value-based learner
 | `ippo`, 10M steps | free | 3 | 0.75 | 0.75 |
 | `mappo`, 10M steps | free | 3 | 0.79 | 0.79 |
 
-### 6.2 Greedy versus sampled actions at evaluation
+### 6.2 Sampled versus greedy actions at evaluation
 
-Every score in §2–§5 and §7 comes from greedy evaluation. `scripts/evaluate.py --sample` re-scores a saved model on the same 50 held-out episodes with each ant sampling its action as in training: PPO samples from π, and the value-based learners act ε-greedily at ε = 0.05.
+Since Nov 22 the headline scores in this report are sampled. `scripts/evaluate.py --sample` re-scores a saved model on the same 50 held-out episodes with each ant sampling its action as in training: PPO samples from π, and the value-based learners act ε-greedily at ε = 0.05. Greedy evaluation, where each ant takes its highest-scoring action, is what training logs at every evaluation (§3, §5, §8.2).
 
 | Learner | World | Seeds | Team food, greedy | Team food, sampled | Paired pieces, greedy → sampled |
 |---|---|---:|---:|---:|---|
@@ -252,8 +254,8 @@ Every score in §2–§5 and §7 comes from greedy evaluation. `scripts/evaluate
 | `mappo` | grid | 5 | 11.42 ± 0.39 | 11.61 ± 0.13 | 3.77 → 3.82 |
 | `vdn` | grid | 3 | 5.51 ± 1.50 | 6.05 ± 1.50 | 1.64 → 1.81 |
 | `iql` | grid | 3 | 3.29 ± 0.17 | 3.45 ± 0.17 | 0 → 0 |
-| `ippo` | free | 5 | 8.49 ± 1.04 | **9.59 ± 0.45** | 1.94 → 2.29 |
-| `mappo` | free | 5 | 7.91 ± 0.78 | **9.43 ± 0.46** | 1.58 → 1.96 |
+| `ippo` | free | 5 | 8.49 ± 1.04 | 9.59 ± 0.45 | 1.94 → 2.29 |
+| `mappo` | free | 5 | 7.91 ± 0.78 | 9.43 ± 0.46 | 1.58 → 1.96 |
 | `iql` | free | 3 | 7.82 ± 0.88 | 7.59 ± 0.60 | 1.55 → 1.47 |
 | `vdn` | free | 3 | 6.84 ± 1.52 | 6.87 ± 1.18 | 1.37 → 1.41 |
 | `vdn`, tuned | grid | 3 | 8.23 ± 0.14 | 8.55 ± 0.15 | 2.65 → 2.75 |
@@ -266,13 +268,16 @@ Every score in §2–§5 and §7 comes from greedy evaluation. `scripts/evaluate
 | `mappo`, 3M steps | free | 3 | 10.16 ± 0.60 | 10.27 ± 0.19 | 2.53 → 2.41 |
 | `ippo`, 10M steps | free | 3 | 10.91 ± 0.52 | 11.49 ± 0.06 | 2.97 → 3.22 |
 | `mappo`, 10M steps | free | 3 | 11.31 ± 0.27 | 11.41 ± 0.05 | 3.02 → 3.10 |
+| `ippo` + all optional switches | grid | 3 | 11.31 ± 0.32 | 11.83 ± 0.07 | 3.73 → 3.93 |
+| `mappo` + all optional switches | grid | 3 | 11.10 ± 0.57 | 11.79 ± 0.02 | 3.67 → 3.91 |
 
 IQL-team and default QMIX barely move (grid 2.73 → 2.83 and 0.08 → 0.13; free 3.47 → 3.51 and 0.37 → 0.41), and neither does tuned IQL-team (grid 3.16 → 3.21, free 5.40 → 5.43).
 
 - **Greedy evaluation underrates PPO where training hasn't settled.** In the free world at 1M steps, sampling raises IPPO from 8.49 to 9.59 and MAPPO from 7.91 to 9.43, and halves the spread across seeds. With more training the average gap shrinks to 0.1–0.2, but a single seed can still lose more to greedy play (IPPO seed 2 at 10M: 10.24 greedy, 11.40 sampled).
 - **Greedy play can deadlock.** When the two holders split, the piece stays where it is, so on the next step they see nearly the same thing and a greedy policy tends to repeat the split. MAPPO seed 3 on the grid is the clearest case. Greedy, its holders agree on 78% of co-holding steps (65% when the nest is diagonal) and it scores 10.82. Sampled, they agree on 98%, each ant id's x-share is 0.70–0.76, and it scores 11.64. Sampling breaks the repeat.
-- **The value-based learners change little,** tuned or not (at most ±0.3), since at ε = 0.05 they act greedily 95% of the time.
-- **Effect on the comparisons.** Scored by sampling, PPO is clearly ahead of default IQL in the free world (9.43–9.59 against 7.59), where greedy scores had them nearly level (§2.2). Tuned IQL and VDN reach the same level when sampled (9.45 and 9.48), so in the free world at 1M steps the two families are level either way. The grid ranking doesn't change. Greedy remains the main protocol in this report; the sampled scores show how the trained policies behave when run as they were trained.
+- **The value-based learners change little,** tuned or not: by at most 0.54 (default VDN on the grid), and usually by 0.3 or less, since at ε = 0.05 they act greedily 95% of the time.
+- **Effect on the comparisons.** Scored by sampling, PPO is clearly ahead of default IQL in the free world (9.43–9.59 against 7.59), where greedy scores had them nearly level. Tuned IQL and VDN reach the same level when sampled (9.45 and 9.48), so in the free world at 1M steps the two families are level either way. The grid ranking doesn't change. The optional switches, which looked slightly worse than the defaults greedily, match them when sampled.
+- **Why sampled is the headline.** Sampling scores each learner the way it acted in training. PPO learns a random policy on purpose, and its training improves the return of that policy as it is sampled; the greedy policy is derived from it and was never trained directly. The value-based learners' policy is the greedy one, and at ε = 0.05 sampling changes them little. Greedy scores stay in every table, and training-time evaluations remain greedy (§12).
 
 ## 7. MAPPO credit variants
 
@@ -280,25 +285,25 @@ MAPPO's default credit gives each ant an advantage from its own blended return (
 - `--set credit=team`: standard MAPPO. Every ant gets the same advantage from the team reward, scaled by 1/n so the critic's loss scale matches.
 - `--set critic_per_ant=true`: V(s) has one output per ant, each fitted to that ant's own blended return. This removes the mismatch.
 
-| Variant | Grid team food | Grid pieces | Grid at 200k / 500k | Free team food | Free pieces | Free paired | Sampled, grid / free |
+| Variant | Grid team food | Grid pieces | Grid at 200k / 500k (greedy) | Free team food | Free pieces | Free paired | Greedy, grid / free |
 |---|---:|---:|---|---:|---:|---:|---|
-| blend, one V(s) (default) | 11.42 ± 0.39 | 3.77 | 6.70 / 11.13 | **7.91 ± 0.78** | **2.44** | **1.58** | 11.61 / **9.43** |
-| team reward only | 11.10 ± 0.40 | 3.60 | 3.23 / 7.69 | 3.26 ± 1.15 | 0.95 | 0.60 | 11.26 / 4.76 |
-| blend, one V(s) output per ant | **11.72 ± 0.19** | **3.88** | **8.09 / 11.55** | 6.72 ± 1.23 | 1.79 | 1.14 | **11.92** / 8.20 |
+| blend, one V(s) (default) | 11.61 ± 0.13 | 3.82 | 6.70 / 11.13 | **9.43 ± 0.46** | **3.00** | **1.96** | 11.42 / 7.91 |
+| team reward only | 11.26 ± 0.23 | 3.65 | 3.23 / 7.69 | 4.76 ± 1.49 | 1.43 | 0.80 | 11.10 / 3.26 |
+| blend, one V(s) output per ant | **11.92 ± 0.04** | **3.96** | **8.09 / 11.55** | 8.20 ± 0.74 | 2.42 | 1.67 | 11.72 / 6.72 |
 
-Seeds 0–4, 1M steps (seeds 3–4 of the two alternatives were added on Nov 21). "Sampled" is team food with each ant sampling its action (§6.2). Per-seed team food:
-- default: grid 11.70, 11.60, 11.14, 10.82, 11.86; free 8.08, 7.22, 8.24, 6.92, 9.10.
-- team reward only: grid 11.48, 11.00, 11.50, 11.12, 10.40; free 4.32, 3.42, 4.68, 2.00, 1.88.
-- per-ant outputs: grid 11.62, 11.88, 11.74, 11.40, 11.94; free 7.82, 6.70, 7.86, 4.46, 6.74.
+Seeds 0–4, 1M steps (seeds 3–4 of the two alternatives were added on Nov 21), sampled (§1). "Grid at 200k / 500k" is the greedy evaluation during training. Per-seed team food, sampled:
+- default: grid 11.42, 11.50, 11.76, 11.64, 11.74; free 9.98, 9.82, 9.28, 8.68, 9.38.
+- team reward only: grid 11.40, 10.94, 11.60, 11.18, 11.16; free 5.06, 5.42, 7.04, 3.30, 2.96.
+- per-ant outputs: grid 11.88, 11.96, 11.88, 11.96, 11.92; free 8.94, 7.86, 8.04, 7.06, 9.08.
 
-- **Each ant's own reward matters.** With the team reward alone, MAPPO learns the grid much more slowly (7.69 against 11.13 at 500k) and ends lower (11.10). On the grid its lone holders wait about twice as long for a partner (24.6 steps per episode, against 12.9 for the default), which is where its extra stalled pulls come from (24.6 per episode, against 15.5). In the free world it scores 3.26, well under half the default, and its two new seeds are its weakest (2.00 and 1.88).
-- **Per-ant value outputs help on the grid.** They give the best and most consistent MAPPO there: every seed scores at least 11.40, they learn fastest (8.09 at 200k against 6.70), and sampled they reach 11.92 ± 0.04.
-- **In the free world they trail the default.** With 5 seeds they score 6.72 against 7.91, and 8.20 against 9.43 when sampled. With 3 seeds the gap was within the seed spread; it is now larger, though the spreads still overlap. One new seed scored 4.46 greedy and 7.06 sampled.
-- **Holder agreement** at 1M is similar across the variants on the grid (0.90–0.93 greedy). In the free world it is 0.69 (team reward only) and 0.71 (per-ant outputs), against 0.81 for the default.
+- **Each ant's own reward matters.** With the team reward alone, MAPPO learns the grid much more slowly (7.69 against 11.13 at 500k, greedy) and ends lower (11.26 against 11.61). In greedy replay its lone holders wait about twice as long for a partner (24.6 steps per episode, against 12.9 for the default), which is where its extra stalled pulls come from (24.6 per episode, against 15.5). In the free world it scores 4.76, about half the default, and its two new seeds are its weakest (3.30 and 2.96).
+- **Per-ant value outputs help on the grid.** They give the best and most consistent MAPPO there: every seed scores at least 11.88 (11.40 greedy), and they learn fastest (8.09 at 200k against 6.70, greedy).
+- **In the free world they trail the default.** With 5 seeds they score 8.20 against 9.43 (6.72 against 7.91 greedy). The seed ranges still overlap (7.06–9.08 against 8.68–9.98). One new seed scored 4.46 greedy and 7.06 sampled.
+- **Holder agreement** at 1M (greedy replay) is similar across the variants on the grid (0.90–0.93). In the free world it is 0.69 (team reward only) and 0.71 (per-ant outputs), against 0.81 for the default.
 
 ## 8. Value-based learners: why QMIX collapsed, and a retune
 
-Until Nov 21 the value-based learners ran only with their default settings: learning rate 5e-4, target networks synced every 500 updates (1,000 environment steps), and ε annealed to 0.05 over 100k steps. This section diagnoses QMIX's collapse and retunes IQL, VDN and QMIX. PPO was not retuned.
+Until Nov 21 the value-based learners ran only with their default settings: learning rate 5e-4, target networks synced every 500 updates (1,000 environment steps), and ε annealed to 0.05 over 100k steps. This section diagnoses QMIX's collapse and retunes IQL, VDN and QMIX. PPO was not retuned. The diagnosis (§8.1) and the screen (§8.2) use the greedy evaluations logged during training; the confirmation (§8.3) reports sampled scores like §2.
 
 ### 8.1 Why QMIX collapsed
 
@@ -329,7 +334,7 @@ Q_tot estimates the discounted team return from replayed states. Tuned VDN and Q
 
 ### 8.2 Screen (seed 0)
 
-One seed of each setting, 1M steps: on the grid for IQL, VDN and QMIX, and in the free world for QMIX, since it diverged worst there. Each cell gives team food at 1M, with the mean of the last three evaluations (800k–1M) in brackets.
+One seed of each setting, 1M steps: on the grid for IQL, VDN and QMIX, and in the free world for QMIX, since it diverged worst there. Each cell gives greedy team food at 1M, with the mean of the last three evaluations (800k–1M) in brackets.
 
 | Setting | IQL, grid | VDN, grid | QMIX, grid | QMIX, free |
 |---|---|---|---|---|
@@ -348,23 +353,23 @@ One seed of each setting, 1M steps: on the grid for IQL, VDN and QMIX, and in th
 
 Seeds 0–2 with the chosen settings. Seed 0 is the screen run: on the grid for IQL, VDN and QMIX, and in the free world for QMIX. The other 20 runs are new.
 
-| Learner | Setting | Grid team food, default → tuned | Grid pieces | Free team food, default → tuned | Free pieces, paired / delivered | Sampled, grid / free |
+| Learner | Setting | Grid team food, default → tuned | Grid pieces | Free team food, default → tuned | Free pieces, paired / delivered | Tuned, greedy, grid / free |
 |---|---|---|---|---|---|---|
-| `vdn` | `lr=2.5e-4 target_update=2000` | 5.51 ± 1.50 → **8.23 ± 0.14** | 1.64 → 2.65 | 6.84 ± 1.52 → **9.63 ± 0.16** | 1.37 / 2.92 → 1.59 / 3.46 | 8.55 / 9.48 |
-| `qmix` | `lr=2.5e-4 target_update=2000` | 0.08 ± 0.10 → **8.44 ± 1.35** | 0 → 2.66 | 0.37 ± 0.52 → 5.35 ± 2.49 | 0 / 0 → 0.63 / 1.07 | 8.44 / 5.47 |
-| `iql` | `lr=2.5e-4` | 3.29 ± 0.17 → 4.52 ± 0.29 | 0 → 0.58 | 7.82 ± 0.88 → 9.17 ± 0.59 | 1.55 / 2.53 → **2.02** / 3.04 | 4.76 / 9.45 |
-| `iql_team` | `lr=2.5e-4` | 2.73 ± 0.22 → 3.16 ± 0.06 | 0 → 0 | 3.47 ± 0.49 → 5.40 ± 0.73 | 0.30 / 0.93 → 0.87 / 1.80 | 3.21 / 5.43 |
+| `vdn` | `lr=2.5e-4 target_update=2000` | 6.05 ± 1.50 → **8.55 ± 0.15** | 1.81 → 2.75 | 6.87 ± 1.18 → **9.48 ± 0.27** | 1.41 / 2.95 → 1.39 / 3.41 | 8.23 / 9.63 |
+| `qmix` | `lr=2.5e-4 target_update=2000` | 0.13 ± 0.19 → **8.44 ± 1.01** | 0 → 2.60 | 0.41 ± 0.58 → 5.47 ± 2.51 | 0 / 0 → 0.53 / 1.14 | 8.44 / 5.35 |
+| `iql` | `lr=2.5e-4` | 3.45 ± 0.17 → 4.76 ± 0.43 | 0 → 0.64 | 7.59 ± 0.60 → 9.45 ± 0.46 | 1.47 / 2.43 → **2.18** / 3.16 | 4.52 / 9.17 |
+| `iql_team` | `lr=2.5e-4` | 2.83 ± 0.20 → 3.21 ± 0.19 | 0 → 0 | 3.51 ± 0.53 → 5.43 ± 0.57 | 0.25 / 0.85 → 0.83 / 1.79 | 3.16 / 5.40 |
 
-Per-seed values are in §2. Learning curves are in §3, and holder agreement in §6.
+Sampled (§1), except the last column. Per-seed values are in §2. Learning curves are in §3, and holder agreement in §6.
 
-- **Every value-based learner improves in both worlds.** VDN also becomes consistent: its seed spread shrinks from 1.50 to 0.14 on the grid and from 1.52 to 0.16 in the free world.
-- **QMIX goes from collapse to the best value-based grid score** (8.44), but its seeds spread more (6.54–9.52), and it is still rising steeply at 1M. In the free world one seed carries pieces (8.88); the other two forage crumbs only (3.52, 3.66).
+- **Every value-based learner improves in both worlds.** VDN also becomes consistent: its seed spread shrinks from 1.50 to 0.15 on the grid and from 1.18 to 0.27 in the free world.
+- **QMIX goes from collapse to about VDN's grid score** (8.44 against 8.55), but its seeds spread more (7.02–9.30), and its greedy curve is still rising steeply at 1M (§3). In the free world one seed carries pieces (9.02); the other two forage crumbs only (3.56, 3.82).
 - **The grid ranking holds.**
-  - PPO stays well ahead: 11.42–11.75 food with 3.8–3.9 pieces, against 8.2–8.4 with 2.7.
-  - The holders of tuned VDN and QMIX agree on 71% and 65% of co-holding steps, against 93–94% for PPO.
-  - IQL, blind to its teammates, now moves some pieces on the grid (0.58 per episode), but its holders agree on only 12% of co-holding steps.
-- **In the free world, tuned value-based learners match PPO at 1M steps.** Tuned VDN (9.63) and IQL (9.17) score above greedy IPPO and MAPPO (8.49, 7.91) and level with their sampled scores (9.59, 9.43). They pair a smaller share of their pieces: 46% for VDN and 66% for IQL, against 73% for IPPO.
-- **Selection bias is small.** The settings were picked on seed 0, which is included above. Seeds 1–2 alone give grid VDN 8.33, QMIX 7.90 and IQL 4.70, and free QMIX 6.27 (8.88 and 3.66). In the free world only QMIX's seed 0 came from a screen.
+  - PPO stays well ahead: 11.61–11.85 food with 3.8–3.9 pieces, against 8.4–8.6 with 2.6–2.75.
+  - The holders of tuned VDN and QMIX agree on 69% and 63% of sampled co-holding steps, against 93–98% for PPO (§6.1).
+  - IQL, blind to its teammates, now moves some pieces on the grid (0.64 per episode), but its holders agree on only 14% of co-holding steps.
+- **In the free world, tuned value-based learners match PPO at 1M steps.** Tuned VDN (9.48) and IQL (9.45) are level with IPPO and MAPPO (9.59, 9.43); greedy, they scored above them. They pair a smaller share of their pieces: 41% for VDN and 69% for IQL, against 74% for IPPO and 65% for MAPPO.
+- **Selection bias is small.** The settings were picked on seed 0, which is included above, using greedy scores. Seeds 1–2 alone give grid VDN 8.52, QMIX 8.01 and IQL 5.01 sampled (8.33, 7.90 and 4.70 greedy), and free QMIX 6.42 (6.27 greedy). In the free world only QMIX's seed 0 came from a screen.
 
 ## 9. What changed
 
@@ -416,6 +421,9 @@ Per-seed values are in §2. Learning curves are in §3, and holder agreement in 
    - Tests: `test_value_update_reports_diagnostics` and `test_qmix_training_logs_window_averaged_diagnostics`. 38 tests pass.
 2. **No default changed.** The tuned settings (§8) are passed with `--set`, so every earlier run still reproduces with the defaults.
 3. **New runs:** the six QMIX diagnostic reruns (`qmix-diag/`), 18 single-seed screen runs (`screen/<setting>/`), and 20 new tuned runs. With the four seed-0 screen runs reused, that makes 24 runs in `tuned/`.
+4. **Sampled scores are the headline.** The summary, §2, §4, §5, §7 and §8.3, and the README, now report sampled scores, with greedy scores alongside. Training-time evaluations, the learning curves and the screen stay greedy.
+   - The six optional-switch runs (`all/`) were re-scored greedily and sampled. Greedy reproduces their logged scores exactly.
+   - `scripts/compare.py --sample` builds its table from `eval_sampled.json`. Test: `test_compare_reads_greedy_metrics_and_sampled_evals`. 39 tests pass.
 
 ### 9.5 Optional switches (all off by default)
 
@@ -473,18 +481,20 @@ The timeout fix alone puts honest MAPPO above `e5295c0`'s hand-coded MAPPO at th
   - Agreement during training (§6.1) was measured for IPPO and MAPPO, seeds 0–2, at each evaluation on held-out episodes, not in the training rollouts themselves.
   - What makes a policy ignore the ant id while holding is open. MAPPO seed 3's id-dependent axis choice shows up only in greedy play (§6.2).
 - **Evaluation.**
-  - Scores are greedy. In the free world at 1M steps, PPO scores 1.1–1.5 higher when each ant samples its action (§6.2), so greedy numbers there understate the trained policies.
+  - Headline scores are sampled, from the final model of each run. Training logs only greedy evaluations, so the learning curves (§3, §5), the QMIX diagnosis and the screen (§8.1–§8.2), including the choice of tuned settings, use greedy scores. In the free world at 1M steps those understate PPO by 1.1–1.5 (§6.2).
+  - The coordination analysis (§6) replays greedy policies; sampled agreement is in §6.1.
 - **Seeds.**
   - 5 seeds for IPPO, MAPPO and the MAPPO credit variants at 1M steps; 3 for everything else.
   - Final numbers come from one checkpoint per seed.
-  - In the free world, MAPPO with per-ant value outputs trails the default by about 1.2 with 5 seeds, but the spreads overlap.
+  - In the free world, MAPPO with per-ant value outputs trails the default by about 1.2 with 5 seeds, but the seed ranges overlap.
 - **No equal-budget comparison** with `e5295c0` at 1M steps.
 
 ## 13. Reproduce
 
 ```bash
-.venv/bin/python -m pytest -q                                   # 38 tests
-.venv/bin/python scripts/compare.py results/fix-compare        # the tables above, from the committed files
+.venv/bin/python -m pytest -q                                   # 39 tests
+.venv/bin/python scripts/compare.py --sample results/fix-compare   # the headline (sampled) tables, from the committed files
+.venv/bin/python scripts/compare.py results/fix-compare            # greedy: each run's last training-time evaluation
 
 # main results: 1M steps; ~4–6 min per PPO run, ~16–26 min per value-based run (one core each)
 for w in grid free; do
@@ -518,7 +528,7 @@ done
 .venv/bin/python scripts/evaluate.py runs/fix-compare/honest/*-s[012]  # adds pieces_paired to older runs
 .venv/bin/python scripts/coordination.py runs/fix-compare/honest/grid-ippo-s*
 .venv/bin/python scripts/coordination.py --sample runs/fix-compare/honest/grid-ippo-s*   # §6.1 final models
-.venv/bin/python scripts/evaluate.py --sample runs/fix-compare/honest/*                  # §6.2
+.venv/bin/python scripts/evaluate.py --sample runs/fix-compare/{honest,all,long,long10m,credit-team,critic-per-ant,tuned}/*   # headline scores (§2, §6.2)
 .venv/bin/python scripts/coordination.py runs/fix-compare/tuned/*                        # §6 tuned rows (and --sample)
 .venv/bin/python scripts/compare.py runs/fix-compare
 ```
